@@ -100,7 +100,9 @@ flywheel-template/
 
 - **M1** (an evening): template repo with CLAUDE.md, ADR/spec templates, lefthook, pr.yml
   (lint + unit only). Router project adopts it immediately.
-- **M2**: component-suite stage in pr.yml. (AI review: done in M1 as a local pre-push hook, ADR 0002.)
+- **M2** ✅: component suite in CI. (Landed as in-process `httptest` fakes — the router's chaos
+  harness — running inside the existing unit job; no docker-compose stage needed until a real
+  external dep appears. AI review: done in M1 as a local pre-push hook, ADR 0002.)
 - **M3**: release.yml + deploy script; router ships v0.1 through it.
 - **M4**: DORA-lite collector + public dashboard + writeup.
 
