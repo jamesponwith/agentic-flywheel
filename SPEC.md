@@ -103,7 +103,9 @@ flywheel-template/
 - **M2** ✅: component suite in CI. (Landed as in-process `httptest` fakes — the router's chaos
   harness — running inside the existing unit job; no docker-compose stage needed until a real
   external dep appears. AI review: done in M1 as a local pre-push hook, ADR 0002.)
-- **M3**: release.yml + deploy script; router ships v0.1 through it.
+- **M3** ✅: release.yml + goreleaser in the template; router shipped v0.1.0 through it
+  (4 platform binaries + changelog, 59s pipeline) with a deploy.sh verified against the
+  real release. Host deploy (linux box, systemd) waits on the box being set up.
 - **M4**: DORA-lite collector + public dashboard + writeup.
 
 ## Success criteria
