@@ -106,7 +106,10 @@ flywheel-template/
 - **M3** ✅: release.yml + goreleaser in the template; router shipped v0.1.0 through it
   (4 platform binaries + changelog, 59s pipeline) with a deploy.sh verified against the
   real release. Host deploy (linux box, systemd) waits on the box being set up.
-- **M4**: DORA-lite collector + public dashboard + writeup.
+- **M4** (mostly done): DORA-lite collector + learn.yml + dora.html shipped in template and
+  router (first real snapshot committed by the workflow 2026-08-08); WRITEUP.md and the router
+  blog post drafted, pending voice pass. Remaining: publish dashboard + post on
+  jamesponwith.github.io; Python/JAX template variant for brax-tennis-rl.
 
 ## Success criteria
 
