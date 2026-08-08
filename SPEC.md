@@ -108,8 +108,11 @@ flywheel-template/
   real release. Host deploy (linux box, systemd) waits on the box being set up.
 - **M4** (mostly done): DORA-lite collector + learn.yml + dora.html shipped in template and
   router (first real snapshot committed by the workflow 2026-08-08); WRITEUP.md and the router
-  blog post drafted, pending voice pass. Remaining: publish dashboard + post on
-  jamesponwith.github.io; Python/JAX template variant for brax-tennis-rl.
+  blog post drafted, pending voice pass. Dashboard live at jamesponwith.github.io/dora.html
+  (fetches each repo's dora.json from raw.githubusercontent). Python variant shipped:
+  github.com/jamesponwith/flywheel-template-py (uv/ruff/pytest gate proven by smoke PR;
+  learn.yml reuses the Go collector via `go run …/tools/dora@latest`). Remaining: publish
+  the blog post after the voice pass; bootstrap brax-tennis-rl from the Python template.
 
 ## Success criteria
 
