@@ -118,9 +118,10 @@ flywheel-template/
 
 - The router is built entirely inside the flywheel — every merged PR passed the full Validate gate.
 - One month of real DORA data on a public dashboard.
-- Starting project #3 (brax-tennis-rl) from the template takes < 30 minutes.
-  (Note: it's a Python/JAX project — M4 includes extracting the Go-specific bits of the template
-  into a variant, which is itself a good test of whether the flywheel generalizes.)
+- ✅ Starting project #3 (brax-tennis-rl) from the template takes < 30 minutes.
+  (Measured 2026-08-11: **2m55s** from `gh repo create --template flywheel-template-py` to
+  smoke PR merged through a green gate — real SPEC in place, uv/ruff/pytest hooks live,
+  beads filed, first DORA snapshot committed by learn.yml minutes later.)
 
 ## Non-goals
 
