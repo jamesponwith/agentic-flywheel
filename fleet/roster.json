@@ -1,0 +1,20 @@
+{
+  "_comment": "The fleet's constitution. Caps derive from review capacity, not compute (ADR 0006). Readable in ten seconds, diffable in review — keep it that way.",
+  "caps": { "prs_per_night": 6, "concurrent_builders": 3, "repos_per_night": 2 },
+  "repos": [
+    { "name": "llm-resiliency-router", "path": "/home/drspeedracer/Workspace/llm-resiliency-router", "lang": "go", "budget_usd_month": 20 },
+    { "name": "agentic-flywheel", "path": "/home/drspeedracer/Workspace/agentic-flywheel", "lang": "go", "budget_usd_month": 15 },
+    { "name": "brax-tennis-rl", "path": "/home/drspeedracer/Workspace/brax-tennis-rl", "lang": "python", "budget_usd_month": 20, "paused": true },
+    { "name": "flywheel-template", "path": "/home/drspeedracer/Workspace/flywheel-template", "lang": "go", "budget_usd_month": 10, "paused": true }
+  ],
+  "agents": [
+    { "name": "fleet/coordinator", "role": "coordinator", "repos": ["*"], "skills": [] },
+    { "name": "fleet/builder-go", "role": "builder", "repos": ["llm-resiliency-router", "agentic-flywheel", "flywheel-template"], "skills": ["go", "shell"] },
+    { "name": "fleet/builder-py", "role": "builder", "repos": ["brax-tennis-rl"], "skills": ["python", "jax", "rl"] },
+    { "name": "fleet/reviewer-correctness", "role": "reviewer", "repos": ["*"], "skills": [] },
+    { "name": "fleet/reviewer-security", "role": "reviewer", "repos": ["*"], "skills": [] },
+    { "name": "fleet/reviewer-ponytail", "role": "reviewer", "repos": ["*"], "skills": [] },
+    { "name": "fleet/operator", "role": "operator", "repos": ["llm-resiliency-router"], "skills": [] },
+    { "name": "fleet/retro", "role": "retro", "repos": ["*"], "skills": [] }
+  ]
+}

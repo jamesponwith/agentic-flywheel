@@ -1,0 +1,4 @@
+{"ts":"2026-08-15T16:52:36Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"fleet drill: proving allocate halts"}
+{"ts":"2026-08-15T16:52:36Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
+{"ts":"2026-08-15T16:52:36Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"fleet","reason":"global drill"}
+{"ts":"2026-08-15T16:52:36Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"fleet"}

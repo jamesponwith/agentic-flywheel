@@ -1,6 +1,4 @@
-
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key
-.beads/proxieddb/
+# `go build ./tools/fleet/` drops a binary named `fleet` in the repo root,
+# which collides with the fleet/ config directory. Always build with -o.
+/fleet
+!/fleet/
