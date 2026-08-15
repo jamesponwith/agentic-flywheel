@@ -13,6 +13,7 @@ var base = time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
 // what the fleet actually did, not just what it returned.
 type fakeBD struct {
 	beads map[string]*Bead
+	order []string // insertion order: map iteration would make results flaky
 	calls []string
 	fail  map[string]bool
 }
@@ -25,6 +26,7 @@ func newFake(bs ...Bead) *fakeBD {
 			b.Metadata = map[string]string{}
 		}
 		f.beads[b.ID] = &b
+		f.order = append(f.order, b.ID)
 	}
 	return f
 }
@@ -41,8 +43,8 @@ func (f *fakeBD) run(dir string, args ...string) ([]byte, error) {
 		return out, nil
 	case "list":
 		var out []Bead
-		for _, b := range f.beads {
-			if b.Status == args[2] {
+		for _, id := range f.order {
+			if b := f.beads[id]; b.Status == args[2] {
 				out = append(out, *b)
 			}
 		}
@@ -50,8 +52,8 @@ func (f *fakeBD) run(dir string, args ...string) ([]byte, error) {
 		return j, nil
 	case "ready":
 		var out []Bead
-		for _, b := range f.beads {
-			if b.Status == "open" {
+		for _, id := range f.order {
+			if b := f.beads[id]; b.Status == "open" {
 				out = append(out, *b)
 			}
 		}

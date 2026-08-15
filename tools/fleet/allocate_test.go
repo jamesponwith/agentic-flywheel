@@ -248,3 +248,28 @@ func TestAllocateHaltsOnKillSwitch(t *testing.T) {
 		t.Errorf("allocated %d beads while stopped", len(plan.Assignments))
 	}
 }
+
+func TestAllocateIsDeterministic(t *testing.T) {
+	// Equal-priority beads must break ties by id, so the same queue always
+	// produces the same plan. Reproducibility is what makes a plan reviewable.
+	beads := []Bead{
+		{ID: "r-4", Status: "open", Type: "task", Priority: 1, Labels: []string{"lang:go"}},
+		{ID: "r-1", Status: "open", Type: "task", Priority: 1, Labels: []string{"lang:go"}},
+		{ID: "r-3", Status: "open", Type: "task", Priority: 1, Labels: []string{"lang:go"}},
+		{ID: "r-2", Status: "open", Type: "task", Priority: 1, Labels: []string{"lang:go"}},
+	}
+	t.Setenv("FLYWHEEL_HOME", t.TempDir())
+	want := []string{"r-1", "r-2", "r-3"} // cap is 3 concurrent builders
+	for run := 0; run < 20; run++ {
+		plan, err := Allocate(testRoster(), fixtures(map[string][]Bead{"/r/router": beads}), base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range want {
+			if plan.Assignments[i].Bead != want[i] {
+				t.Fatalf("run %d: assignment[%d] = %s, want %s — plan is not reproducible",
+					run, i, plan.Assignments[i].Bead, want[i])
+			}
+		}
+	}
+}

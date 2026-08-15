@@ -77,7 +77,16 @@ func Allocate(r Roster, open openClient, now time.Time) (Plan, error) {
 			continue
 		}
 		beads = allocatable(beads, now)
-		sort.SliceStable(beads, func(i, j int) bool { return beads[i].Priority < beads[j].Priority })
+		// Sort by priority, then id. The id tiebreak is not cosmetic: without
+		// it, equal-priority beads come back in whatever order bd emitted them,
+		// so two runs of the same queue produce different plans. A plan you
+		// cannot reproduce is a plan you cannot diff, review, or replay.
+		sort.SliceStable(beads, func(i, j int) bool {
+			if beads[i].Priority != beads[j].Priority {
+				return beads[i].Priority < beads[j].Priority
+			}
+			return beads[i].ID < beads[j].ID
+		})
 
 		for _, b := range beads {
 			if len(plan.Assignments) >= r.Caps.PRsPerNight {
