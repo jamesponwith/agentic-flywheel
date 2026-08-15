@@ -1,0 +1,20 @@
+# Build inner-loop gate. Under 10s or it gets skipped — speed is a feature.
+# The conformance suite is NOT here: it spins up real bd databases and takes
+# ~75s. It runs in CI (pr.yml) and on demand.
+pre-commit:
+  parallel: true
+  commands:
+    gofmt:
+      run: test -z "$(gofmt -l .)" || { echo "unformatted:"; gofmt -l .; exit 1; }
+    vet:
+      run: go vet ./...
+    test:
+      run: go test -short ./...
+    shellcheck:
+      glob: "*.sh"
+      run: sh -n {staged_files}
+
+pre-push:
+  commands:
+    ai-review:
+      run: command -v claude >/dev/null || exit 0; claude -p "/ponytail-review origin/main...HEAD" || true

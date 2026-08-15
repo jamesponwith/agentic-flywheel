@@ -1,0 +1,31 @@
+# Validate: no green, no merge. The flywheel's own home runs the flywheel's own
+# gate — a meta repo exempt from its own rules is a rule nobody believes.
+name: pr
+
+on:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  conformance:
+    # The protocol's failure behaviour: two agents on one bead, killed agents,
+    # stale leases, the kill switch. Needs the real bd binary.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install bd
+        run: go install github.com/gastownhall/beads/cmd/bd@latest
+      - run: go test -tags=conformance -timeout=10m ./tools/fleet/
