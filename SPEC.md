@@ -165,6 +165,8 @@ unless something watches — and Learn cannot be truthful until something does.
 | `fw-e7e` | Learn v2: measure the agent, not just the code                | Nobody has public numbers on what agentic development costs     |
 | `fw-cpd` | Intent v2: self-decomposing specs, signals as beads           | The stage with the most hand-work and the least machinery       |
 | `fw-fsa` | Distribution: five repos on one flywheel, and the story       | A template repo solves onboarding once and then rots            |
+| `fw-wb2` | Inter-agent protocol: identity, territory, claims, handoffs   | Two agents in one repo without a contract is a race, not a fleet |
+| `fw-oef` | Agent fleet: many agents, five repos, one budget              | Five repos are no longer tractable by hand                      |
 
 ## v2 success criteria
 
@@ -175,23 +177,53 @@ unless something watches — and Learn cannot be truthful until something does.
 - One dashboard covering every flywheel repo, carrying agent-effectiveness metrics alongside DORA,
   with a month of real history.
 - `flywheel doctor` brings an existing instance up to current template in one command.
+- Two agents work one repo concurrently without corrupting each other — territory reserved before
+  edit, claims leased and reclaimable, handoffs acknowledged — proven by a conformance harness that
+  kills agents mid-flight, not by it having gone fine once.
+- One coordinator distributes ready work across all five repos overnight inside a declared budget,
+  with a live view of who holds what and a kill switch verified by tripping it with agents active.
 
-## Open decision
+## Resolved: scope is a budget (ADR 0001)
 
-`fw-2bv` — **the non-goals below were written when the flywheel had one instance.** It now has five
-repos, and the v2 epics propose precisely what the first non-goal rules out. The non-goal states a
-category ban but its stated reason is a cost test; the case for revising it is that "cheap enough to
-actually use" survives contact with a fourth project and "never orchestrate" does not. The case for
-keeping it is that category bans are enforceable and cost tests lose to enthusiasm at 11pm.
-Proposed resolution: every stage declares a standing cost in minutes and dollars per month, and
-anything over budget for two consecutive retros gets deleted. Not yet decided.
+`fw-2bv` is closed. The v1 non-goal banning fleets and inter-agent protocols named a category but
+justified a cost; it is replaced by an explicit budget (see Non-goals below and `docs/adr/0001`).
+Fleets and protocols are in scope, priced rather than prohibited, with review capacity — not
+compute — named as the binding constraint.
 
+## The agent stack
+
+Fleets need identity, file-level mutual exclusion, durable acknowledged messaging, and a
+tamper-evident journal. All four already run on this machine, so the protocol epic is wiring and
+convention rather than new services — which is the only reason it fits the budget (ADR 0004).
+
+| Layer | Owns | Provided by |
+|-------|------|-------------|
+| Work graph | issues, dependencies, claims, gates, merge-slot, swarms | `bd` (beads) |
+| Coordination | agent identity, file reservations with fencing tokens, conversations, acks, event journal | `blackbird` (systemd daemon, MCP-connected) |
+| Execution | worktrees, subagents, skills, scheduled runs | Claude Code |
+
+`bd` claims the **work**; blackbird reserves the **files**. Both are required before an agent edits
+anything. Agents fail closed: no reservation, no edit.
+
+## v2 ADRs
+
+| ADR | Decision |
+|-----|----------|
+| 0001 | Scope is a budget, not a ban — fleets and protocols priced, not prohibited |
+| 0002 | Operate is a first-class stage — incidents filed and closed by machine |
+| 0003 | Autonomy boundaries — unattended agents branch and PR; never merge, tag, deploy, or read secrets |
+| 0004 | Agents stand on beads + blackbird + Claude Code — build none of it again |
 
 ## Non-goals
 
-- Multi-repo orchestration dashboards, agent fleets, inter-agent protocols — that's the C1 version;
-  the personal one must stay cheap enough to actually use.
-  **(Under review as of 2026-08-15 — see `fw-2bv` and Chapter 2. Written at one instance; the
-  flywheel now has five repos.)**
+- ~~Multi-repo orchestration dashboards, agent fleets, inter-agent protocols~~ — **superseded
+  2026-08-15 by ADR 0001.** The non-goal named a category but justified a cost, and at five repos
+  the same reasoning that once argued against orchestration now argues for it. Replaced by a budget:
+  every stage and epic declares a standing cost in minutes and dollars per month, and anything over
+  budget for two consecutive retros gets deleted or automated. Fleets and inter-agent protocols are
+  priced, not prohibited.
+- Anything that outruns one human's review capacity. Review mornings, not compute, are the binding
+  constraint on the fleet; a fleet that produces more plausible PRs than you can read properly has
+  failed its budget no matter what it cost to run.
 - Any stage that requires discipline you won't sustain. If a gate gets bypassed twice, delete it or
   automate it — a documented-but-ignored process is worse than none (put that line in the writeup).
