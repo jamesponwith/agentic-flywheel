@@ -7,6 +7,7 @@
 //	fleet reclaim                               sweep expired leases to ready
 //	fleet status                                who holds what, across the fleet
 //	fleet allocate                              tonight's plan (prints, never spawns)
+//	fleet hydrate                               make every repo's beads readable
 package main
 
 import (
@@ -65,6 +66,8 @@ func main() {
 		err = doStatus(*rosterPath, *asJSON)
 	case "allocate":
 		err = doAllocate(*rosterPath, *asJSON)
+	case "hydrate":
+		err = doHydrate(*rosterPath, *asJSON)
 	default:
 		usage()
 		os.Exit(2)
@@ -176,6 +179,44 @@ func doAllocate(rosterPath string, asJSON bool) error {
 	return nil
 }
 
+func doHydrate(rosterPath string, asJSON bool) error {
+	r, err := LoadRoster(rosterPath)
+	if err != nil {
+		return err
+	}
+	res := Hydrate(r, liveHydrateOps())
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(res)
+	}
+	for _, x := range res {
+		line := fmt.Sprintf("  %-22s %s", x.Repo, x.Action)
+		if x.Detail != "" {
+			line += " — " + x.Detail
+		}
+		fmt.Println(line)
+	}
+	fmt.Println(summarize(res))
+	for _, x := range res {
+		if x.Action == "failed" || x.Action == "skipped" {
+			// Non-zero so a scheduled run surfaces it instead of looking fine.
+			return fmt.Errorf("%d repo(s) still unreadable", countBad(res))
+		}
+	}
+	return nil
+}
+
+func countBad(rs []HydrateResult) int {
+	n := 0
+	for _, r := range rs {
+		if r.Action == "failed" || r.Action == "skipped" {
+			n++
+		}
+	}
+	return n
+}
+
 func defaultRoster() string {
 	if p := os.Getenv("FLEET_ROSTER"); p != "" {
 		return p
@@ -198,5 +239,6 @@ func usage() {
   fleet reclaim [-dir .] [-json]
   fleet status [-roster PATH] [-json]
   fleet allocate [-roster PATH] [-json]
+  fleet hydrate [-roster PATH] [-json]
 `)
 }
