@@ -123,9 +123,75 @@ flywheel-template/
   smoke PR merged through a green gate — real SPEC in place, uv/ruff/pytest hooks live,
   beads filed, first DORA snapshot committed by learn.yml minutes later.)
 
+---
+
+# Chapter 2 — v2 scope (opened 2026-08-15)
+
+V1 answered "does the C1 flywheel survive at a team of one?" — yes, five stages, three instances,
+one released binary. V2 answers the two questions v1 left open:
+
+1. **The cycle stops too early.** The flywheel ends at "binary on a host". Nothing observes the
+   running thing, which means change-failure rate and MTTR — half of DORA — are fed by remembering
+   to label a GitHub issue `incident`. By this spec's own rule, that is a process that will quietly
+   stop happening.
+2. **The agent is barely agentic.** One agent, one session, a human sitting in front of it. Worktree
+   isolation, subagents, scheduled runs, and beads' own multi-agent primitives (`swarm`, `gate`,
+   `merge-slot`) are all installed and unused.
+
+Tracked as six epics in this repo's `bd` board (`bd list`, prefix `fw`).
+
+## The sixth stage
+
+| Stage    | Personal (v1)                                             | v2 change                                        |
+|----------|-----------------------------------------------------------|--------------------------------------------------|
+| Intent   | SPEC.md, ADRs, beads                                       | spec → bead-graph decomposition; external signals file beads |
+| Build    | Claude Code + ponytail, CLAUDE.md, lefthook                | unattended runs: one ready bead → worktree → PR  |
+| Validate | pr.yml gate, local pre-push AI review                      | three-lens review panel, findings ledger, supply chain |
+| Release  | goreleaser, semver tags, deploy.sh                         | SBOM + signature + provenance; post-deploy smoke |
+| **Operate** | *(absent — the artifact ran unobserved)*                | **SLOs, probes, auto-filed incidents, auto-rollback** |
+| Learn    | DORA-lite from the GitHub API                              | agent-effectiveness + cost metrics; automated retro |
+
+Operate is the honest name for the gap between "released" and "learned". At C1 that gap was filled
+by tenants running the artifact and someone else owning its telemetry. Solo, nobody is watching
+unless something watches — and Learn cannot be truthful until something does.
+
+## Epics
+
+| Epic     | Title                                                        | Why it exists                                                  |
+|----------|--------------------------------------------------------------|----------------------------------------------------------------|
+| `fw-wma` | Operate: promote the Release→Learn gap to a first-class stage | Makes CFR and MTTR measured rather than remembered              |
+| `fw-lb8` | Autonomous loop                                              | The queue drains overnight; the human still merges              |
+| `fw-l8k` | Validate v2: review panel, findings ledger, supply chain      | Diversity of review, and a record of whether review works       |
+| `fw-e7e` | Learn v2: measure the agent, not just the code                | Nobody has public numbers on what agentic development costs     |
+| `fw-cpd` | Intent v2: self-decomposing specs, signals as beads           | The stage with the most hand-work and the least machinery       |
+| `fw-fsa` | Distribution: five repos on one flywheel, and the story       | A template repo solves onboarding once and then rots            |
+
+## v2 success criteria
+
+- An SLO breach on a deployed instance files an incident, its recovery closes it, and the router's
+  `dora.json` shows a non-zero CFR and MTTR that no human hand-authored.
+- Seven consecutive unattended nights producing green, reviewable PRs — with a budget cap, an audit
+  log, and a kill switch verified by tripping it mid-run.
+- One dashboard covering every flywheel repo, carrying agent-effectiveness metrics alongside DORA,
+  with a month of real history.
+- `flywheel doctor` brings an existing instance up to current template in one command.
+
+## Open decision
+
+`fw-2bv` — **the non-goals below were written when the flywheel had one instance.** It now has five
+repos, and the v2 epics propose precisely what the first non-goal rules out. The non-goal states a
+category ban but its stated reason is a cost test; the case for revising it is that "cheap enough to
+actually use" survives contact with a fourth project and "never orchestrate" does not. The case for
+keeping it is that category bans are enforceable and cost tests lose to enthusiasm at 11pm.
+Proposed resolution: every stage declares a standing cost in minutes and dollars per month, and
+anything over budget for two consecutive retros gets deleted. Not yet decided.
+
+
 ## Non-goals
 
 - Multi-repo orchestration dashboards, agent fleets, inter-agent protocols — that's the C1 version;
   the personal one must stay cheap enough to actually use.
+  **(Under review as of 2026-08-15 — see `fw-2bv` and Chapter 2. Written at one instance; the
+  flywheel now has five repos.)**
 - Any stage that requires discipline you won't sustain. If a gate gets bypassed twice, delete it or
   automate it — a documented-but-ignored process is worse than none (put that line in the writeup).
