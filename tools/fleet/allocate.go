@@ -16,10 +16,11 @@ import (
 )
 
 type Assignment struct {
-	Repo  string `json:"repo"`
-	Bead  string `json:"bead"`
-	Title string `json:"title"`
-	Agent string `json:"agent"`
+	Repo   string `json:"repo"`
+	Bead   string `json:"bead"`
+	Title  string `json:"title"`
+	Agent  string `json:"agent"`
+	Weight int    `json:"weight"`
 }
 
 type Declined struct {
@@ -33,6 +34,12 @@ type Plan struct {
 	Assignments []Assignment `json:"assignments"`
 	Declined    []Declined   `json:"declined"`
 	Caps        Caps         `json:"caps"`
+	// Weight budget accounting (ADR 0009). InReview is weight already sitting
+	// in open PRs: a full queue reduces what tonight may start, which is the
+	// constraint enforcing itself rather than being remembered.
+	Allocated int `json:"allocated_weight"`
+	InReview  int `json:"in_review_weight"`
+	Budget    int `json:"budget_weight"`
 	// Stopped is non-empty when the kill switch halted this cycle.
 	Stopped string `json:"stopped,omitempty"`
 }
@@ -41,15 +48,47 @@ type Plan struct {
 // fixtures instead of five real repositories.
 type openClient func(path string) bdClient
 
+// reviewLoad reports weight already awaiting review in a repo. Injected so
+// tests never touch the network.
+type reviewLoad func(repo Repo) int
+
 // Allocate produces the night's plan. It does not spawn anything: handing back
 // a plan means the caller can print it, diff it, or run it, and a dry run is
 // the default rather than a special mode.
 func Allocate(r Roster, open openClient, now time.Time) (Plan, error) {
-	plan := Plan{GeneratedAt: now.UTC(), Caps: r.Caps}
+	return AllocateWithLoad(r, open, nil, now)
+}
+
+// AllocateWithLoad is Allocate with review pressure accounted for.
+func AllocateWithLoad(r Roster, open openClient, load reviewLoad, now time.Time) (Plan, error) {
+	r.Caps = r.Caps.normalized()
+	if r.Caps.ReviewWeightPerNight <= 0 {
+		// Refuse rather than allocate nothing. A scheduler that silently does
+		// no work looks identical to a scheduler with an empty queue.
+		return Plan{GeneratedAt: now.UTC(), Caps: r.Caps}, fmt.Errorf(
+			"review_weight_per_night must be positive — see ADR 0009")
+	}
+	plan := Plan{GeneratedAt: now.UTC(), Caps: r.Caps, Budget: r.Caps.ReviewWeightPerNight}
 
 	// The kill switch outranks everything, including work already ready.
 	if why, halted := stopped(r.activePaths()); halted {
 		plan.Stopped = why
+		return plan, nil
+	}
+
+	// Weight already in review is spent before tonight starts.
+	if load != nil {
+		for _, repo := range r.Repos {
+			if !repo.Paused {
+				plan.InReview += load(repo)
+			}
+		}
+	}
+	remaining := func() int { return plan.Budget - plan.InReview - weightOf(plan.Assignments) }
+	if remaining() <= 0 {
+		plan.Declined = append(plan.Declined, Declined{
+			Reason: fmt.Sprintf("review queue is full: %d weight already open against a budget of %d — merge before starting more",
+				plan.InReview, plan.Budget)})
 		return plan, nil
 	}
 
@@ -59,9 +98,9 @@ func Allocate(r Roster, open openClient, now time.Time) (Plan, error) {
 			plan.Declined = append(plan.Declined, Declined{Repo: repo.Name, Reason: "repo paused in roster"})
 			continue
 		}
-		if len(plan.Assignments) >= r.Caps.PRsPerNight {
+		if remaining() <= 0 {
 			plan.Declined = append(plan.Declined, Declined{Repo: repo.Name,
-				Reason: fmt.Sprintf("nightly PR cap reached (%d)", r.Caps.PRsPerNight)})
+				Reason: fmt.Sprintf("review weight budget spent (%d/%d)", plan.Budget-remaining(), plan.Budget)})
 			continue
 		}
 		if len(reposUsed) >= r.Caps.ReposPerNight && !reposUsed[repo.Name] {
@@ -89,10 +128,13 @@ func Allocate(r Roster, open openClient, now time.Time) (Plan, error) {
 		})
 
 		for _, b := range beads {
-			if len(plan.Assignments) >= r.Caps.PRsPerNight {
+			w := Weight(b)
+			if w > remaining() {
+				// Not "break": a lighter bead further down the queue may still
+				// fit, and skipping it would waste budget on nothing.
 				plan.Declined = append(plan.Declined, Declined{Repo: repo.Name, Bead: b.ID,
-					Reason: fmt.Sprintf("nightly PR cap reached (%d)", r.Caps.PRsPerNight)})
-				break
+					Reason: fmt.Sprintf("weight %d exceeds the %d remaining in the budget", w, remaining())})
+				continue
 			}
 			if countFor(plan.Assignments, repo.Name) >= r.Caps.ConcurrentBuilders {
 				plan.Declined = append(plan.Declined, Declined{Repo: repo.Name, Bead: b.ID,
@@ -106,12 +148,31 @@ func Allocate(r Roster, open openClient, now time.Time) (Plan, error) {
 				continue
 			}
 			plan.Assignments = append(plan.Assignments, Assignment{
-				Repo: repo.Name, Bead: b.ID, Title: b.Title, Agent: agents[0].Name,
+				Repo: repo.Name, Bead: b.ID, Title: b.Title, Agent: agents[0].Name, Weight: w,
 			})
 			reposUsed[repo.Name] = true
 		}
 	}
+	plan.Allocated = weightOf(plan.Assignments)
+
+	// Every repo appears exactly once: as assignments, or as a decline naming
+	// the reason. Silence would read as "nothing to say" (fw-oef.11).
+	for _, repo := range r.Repos {
+		if countFor(plan.Assignments, repo.Name) > 0 || declinedFor(plan.Declined, repo.Name) {
+			continue
+		}
+		plan.Declined = append(plan.Declined, Declined{Repo: repo.Name, Reason: "no ready work"})
+	}
 	return plan, nil
+}
+
+func declinedFor(ds []Declined, repo string) bool {
+	for _, d := range ds {
+		if d.Repo == repo {
+			return true
+		}
+	}
+	return false
 }
 
 // allocatable filters out what an unattended builder must not take: epics

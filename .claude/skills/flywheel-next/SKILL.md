@@ -97,6 +97,25 @@ tests), then the complete suite, then the pre-push review.
 **Never bypass a failing gate.** `--no-verify` is not available to you. A red
 gate you cannot make green is a step-8 outcome, not a step-7 one.
 
+## 6b. Shape the PR before you open it (ADR 0009)
+
+Review capacity is the fleet's binding constraint, and it is spent by
+*judgement*, not by line count. Two rules:
+
+**One PR is one idea that can stand alone and be reverted alone.** Group changes
+that only make sense together. Never bundle unrelated fixes to save a PR, and
+never split one coherent idea to look smaller — both make review harder, in
+opposite directions.
+
+**Stack dependent work; do not merge it or split it.** If your bead's change
+builds on another that is still in review, branch from *that* branch and open
+the PR against it. Each PR then stays small and is reviewed against its parent,
+and the stack merges bottom-up. Say in the PR body which branch it stacks on.
+
+Declare the review weight on the bead if it is not already labelled: `w:1`
+mechanical, `w:2` ordinary, `w:3` a new subsystem or something hard to reverse.
+The coordinator budgets in weight, so an unweighted bead costs 2 by default.
+
 ## 7. Open the PR
 
 Commit in small imperative commits referencing the bead (`<bead-id>: add retry

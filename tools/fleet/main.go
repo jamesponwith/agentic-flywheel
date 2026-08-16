@@ -156,9 +156,9 @@ func doAllocate(rosterPath string, asJSON bool) error {
 	if err != nil {
 		return err
 	}
-	plan, err := Allocate(r, func(path string) bdClient {
+	plan, err := AllocateWithLoad(r, func(path string) bdClient {
 		return bdClient{dir: path, run: execBD}
-	}, time.Now())
+	}, ghReviewLoad, time.Now())
 	if err != nil {
 		return err
 	}
@@ -171,10 +171,11 @@ func doAllocate(rosterPath string, asJSON bool) error {
 		fmt.Printf("HALTED — kill switch set (%s)\nNo work allocated. Clear it with: tools/flywheel/guard.sh resume [--fleet]\n", plan.Stopped)
 		return nil
 	}
-	fmt.Printf("plan for %s (caps: %d PRs, %d builders, %d repos)\n\n",
-		plan.GeneratedAt.Format("2006-01-02"), r.Caps.PRsPerNight, r.Caps.ConcurrentBuilders, r.Caps.ReposPerNight)
+	fmt.Printf("plan for %s — review weight %d/%d (%d already in review), %d builders, %d repos\n\n",
+		plan.GeneratedAt.Format("2006-01-02"), plan.Allocated+plan.InReview, plan.Budget,
+		plan.InReview, r.Caps.ConcurrentBuilders, r.Caps.ReposPerNight)
 	for _, a := range plan.Assignments {
-		fmt.Printf("  %-22s %-12s → %-24s %s\n", a.Repo, a.Bead, a.Agent, a.Title)
+		fmt.Printf("  %-22s %-12s w%d → %-24s %s\n", a.Repo, a.Bead, a.Weight, a.Agent, a.Title)
 	}
 	if len(plan.Assignments) == 0 {
 		fmt.Println("  (nothing allocatable)")
