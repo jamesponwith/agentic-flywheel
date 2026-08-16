@@ -59,4 +59,14 @@ pre-push:
           exit 0
         fi
         after=$(count)
-        [ "$after" -gt "$before" ] && echo "review: $((after - before)) finding(s) recorded" || echo "review: ran, no findings"
+        if [ "$after" -gt "$before" ]; then
+          echo "review: $((after - before)) finding(s) recorded"
+        else
+          # Do NOT report this as "no findings". The panel's first genuine run
+          # found a real bug and printed its recording command instead of
+          # running it, leaving the ledger empty — so an unchanged ledger means
+          # "did not record", which is indistinguishable from "found nothing"
+          # and must not be reported as the reassuring one.
+          echo "review: ran but wrote NOTHING to the ledger — treat as unrecorded," >&2
+          echo "        not as a clean review. See fw-l8k.7." >&2
+        fi
