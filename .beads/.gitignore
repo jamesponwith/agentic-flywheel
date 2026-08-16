@@ -75,3 +75,10 @@ bd.db
 # They would override fork protection in .git/info/exclude.
 # Config files (metadata.json, config.yaml) are tracked by git by default
 # since no pattern above ignores them.
+
+# Exports, not source of truth (ADR 0011). The Dolt database is authoritative
+# and syncs via refs/dolt/data on the git remote; these files are regenerated
+# by `bd export` and conflicted on three separate rebases in one session
+# because two branches touching the board always both rewrite them.
+issues.jsonl
+interactions.jsonl
