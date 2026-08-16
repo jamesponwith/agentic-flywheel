@@ -10,13 +10,45 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 type Roster struct {
-	Caps   Caps    `json:"caps"`
-	Repos  []Repo  `json:"repos"`
-	Agents []Agent `json:"agents"`
+	// WorkspaceRoot is prepended to any relative repo path. Defaults to
+	// $FLYWHEEL_WORKSPACE, then ~/Workspace. Keeping it out of the committed
+	// paths is what makes the roster portable — and stops a public repo
+	// publishing the maintainer's home directory layout.
+	WorkspaceRoot string  `json:"workspace_root,omitempty"`
+	Caps          Caps    `json:"caps"`
+	Repos         []Repo  `json:"repos"`
+	Agents        []Agent `json:"agents"`
+}
+
+// expandPath resolves ~, $HOME, and paths relative to the workspace root.
+// An absolute path is honoured as-is, so an unusual layout is still expressible.
+func expandPath(p, root string) string {
+	if p == "" {
+		return p
+	}
+	p = os.ExpandEnv(p)
+	if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[2:])
+		}
+	}
+	if filepath.IsAbs(p) {
+		return p
+	}
+	if root == "" {
+		root = os.Getenv("FLYWHEEL_WORKSPACE")
+	}
+	if root == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			root = filepath.Join(home, "Workspace")
+		}
+	}
+	return filepath.Join(expandPath(root, ""), p)
 }
 
 // Caps derive from review capacity, not compute (ADR 0006).
@@ -49,6 +81,9 @@ func LoadRoster(path string) (Roster, error) {
 	}
 	if err := json.Unmarshal(b, &r); err != nil {
 		return r, fmt.Errorf("%s: %w", path, err)
+	}
+	for i := range r.Repos {
+		r.Repos[i].Path = expandPath(r.Repos[i].Path, r.WorkspaceRoot)
 	}
 	if r.Caps.PRsPerNight <= 0 || r.Caps.ConcurrentBuilders <= 0 || r.Caps.ReposPerNight <= 0 {
 		return r, fmt.Errorf("%s: caps must all be positive — see ADR 0006", path)

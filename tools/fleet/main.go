@@ -8,6 +8,7 @@
 //	fleet status                                who holds what, across the fleet
 //	fleet allocate                              tonight's plan (prints, never spawns)
 //	fleet hydrate                               make every repo's beads readable
+//	fleet bypasses                              gates that got skipped, and by how much
 package main
 
 import (
@@ -31,6 +32,7 @@ func main() {
 	dir := fs.String("dir", ".", "repo directory")
 	rosterPath := fs.String("roster", defaultRoster(), "path to roster.json")
 	asJSON := fs.Bool("json", false, "JSON output")
+	since := fs.String("since", "", "only consider history since this git date (e.g. 30.days)")
 
 	// Subcommands taking a bead id read it before the flags.
 	var bead string
@@ -68,6 +70,8 @@ func main() {
 		err = doAllocate(*rosterPath, *asJSON)
 	case "hydrate":
 		err = doHydrate(*rosterPath, *asJSON)
+	case "bypasses":
+		err = doBypasses(*rosterPath, *since, *asJSON)
 	default:
 		usage()
 		os.Exit(2)
@@ -217,6 +221,44 @@ func countBad(rs []HydrateResult) int {
 	return n
 }
 
+func doBypasses(rosterPath, since string, asJSON bool) error {
+	r, err := LoadRoster(rosterPath)
+	if err != nil {
+		return err
+	}
+	var all []Bypass
+	for _, repo := range r.Repos {
+		bs, err := DetectBypasses(repo.Name, repo.Path, since)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", repo.Name, err)
+			continue
+		}
+		all = append(all, bs...)
+	}
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(map[string]any{"bypasses": all, "over_budget": OverBudget(all)})
+	}
+	if len(all) == 0 {
+		fmt.Println("no bypasses detected")
+		return nil
+	}
+	for _, b := range all {
+		fmt.Printf("  %-22s %-16s %-9s %s\n", b.Repo, b.Kind, b.Commit, b.Detail)
+	}
+	over := OverBudget(all)
+	if len(over) == 0 {
+		fmt.Printf("\n%d bypass(es), none over the budget of %d\n", len(all), BypassBudget)
+		return nil
+	}
+	fmt.Printf("\nOVER BUDGET (>%d) — delete the gate or automate it:\n", BypassBudget)
+	for k, n := range over {
+		fmt.Printf("  %s: %d\n", k, n)
+	}
+	return nil
+}
+
 func defaultRoster() string {
 	if p := os.Getenv("FLEET_ROSTER"); p != "" {
 		return p
@@ -240,5 +282,6 @@ func usage() {
   fleet status [-roster PATH] [-json]
   fleet allocate [-roster PATH] [-json]
   fleet hydrate [-roster PATH] [-json]
+  fleet bypasses [-roster PATH] [-since 30.days] [-json]
 `)
 }
