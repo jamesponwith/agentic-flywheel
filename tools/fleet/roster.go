@@ -19,10 +19,12 @@ type Roster struct {
 	// $FLYWHEEL_WORKSPACE, then ~/Workspace. Keeping it out of the committed
 	// paths is what makes the roster portable — and stops a public repo
 	// publishing the maintainer's home directory layout.
-	WorkspaceRoot string  `json:"workspace_root,omitempty"`
-	Caps          Caps    `json:"caps"`
-	Repos         []Repo  `json:"repos"`
-	Agents        []Agent `json:"agents"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	Caps          Caps   `json:"caps"`
+	// Runner is how a builder is invoked (ADR 0010). Omit for the default.
+	Runner Runner  `json:"runner,omitempty"`
+	Repos  []Repo  `json:"repos"`
+	Agents []Agent `json:"agents"`
 }
 
 // expandPath resolves ~, $HOME, and paths relative to the workspace root.
