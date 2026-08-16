@@ -27,5 +27,13 @@ jobs:
         with:
           go-version-file: go.mod
       - name: install bd
-        run: go install github.com/gastownhall/beads/cmd/bd@latest
+        # Prebuilt binary, not `go install`: bd vendors Dolt, so building it
+        # from source takes minutes on every run. Pinned rather than @latest —
+        # the conformance suite asserts bd's behaviour, so an unannounced bd
+        # release should fail loudly here, not silently change what we test.
+        run: |
+          ver=1.2.2
+          curl -fsSL "https://github.com/steveyegge/beads/releases/download/v${ver}/beads_${ver}_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin bd
+          bd version
       - run: go test -tags=conformance -timeout=10m ./tools/fleet/
