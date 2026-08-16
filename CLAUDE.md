@@ -31,6 +31,11 @@ tooling that runs *across* repos. Per-project tooling lives in the templates
   without a lease starves the queue if you die.
 - Anything expected to take more than one session gets a design note in the
   bead's `--design` field first: signatures and boundaries, no prose (ADR 0008).
+- Beads carry a review weight — `w:1` mechanical, `w:2` ordinary, `w:3` a new
+  subsystem or hard to reverse. The coordinator budgets weight, not PR count
+  (ADR 0009); unweighted beads cost 2.
+- One PR is one idea that can stand alone and be reverted alone. Stack
+  dependent work against its parent branch rather than bundling or splitting it.
 - Agent-to-agent messages are `handoff`, `finding`, `escalate`, `status` and
   nothing else; `handoff` and `escalate` require an ack (ADR 0007). If you are
   stuck, `escalate` — do not guess confidently.

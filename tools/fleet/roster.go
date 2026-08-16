@@ -51,11 +51,19 @@ func expandPath(p, root string) string {
 	return filepath.Join(expandPath(root, ""), p)
 }
 
-// Caps derive from review capacity, not compute (ADR 0006).
+// Caps derive from review capacity, not compute (ADR 0006), and are measured
+// in review WEIGHT rather than PR count (ADR 0009) — a 9-line CI fix and a
+// 600-line coordinator are both "1 PR" and are nothing like the same review.
 type Caps struct {
-	PRsPerNight        int `json:"prs_per_night"`
-	ConcurrentBuilders int `json:"concurrent_builders"`
-	ReposPerNight      int `json:"repos_per_night"`
+	// ReviewWeightPerNight is the budget. Eight trivia or two hard changes,
+	// whichever the queue holds.
+	ReviewWeightPerNight int `json:"review_weight_per_night"`
+	ConcurrentBuilders   int `json:"concurrent_builders"`
+	ReposPerNight        int `json:"repos_per_night"`
+
+	// PRsPerNight is the superseded ADR 0006 cap. Read for migration only:
+	// a roster that still sets it gets it treated as weight, with a warning.
+	PRsPerNight int `json:"prs_per_night,omitempty"`
 }
 
 type Repo struct {
@@ -85,10 +93,23 @@ func LoadRoster(path string) (Roster, error) {
 	for i := range r.Repos {
 		r.Repos[i].Path = expandPath(r.Repos[i].Path, r.WorkspaceRoot)
 	}
-	if r.Caps.PRsPerNight <= 0 || r.Caps.ConcurrentBuilders <= 0 || r.Caps.ReposPerNight <= 0 {
-		return r, fmt.Errorf("%s: caps must all be positive — see ADR 0006", path)
+	r.Caps = r.Caps.normalized()
+	if r.Caps.ReviewWeightPerNight <= 0 || r.Caps.ConcurrentBuilders <= 0 || r.Caps.ReposPerNight <= 0 {
+		return r, fmt.Errorf("%s: caps must all be positive — see ADR 0006 and 0009", path)
 	}
 	return r, nil
+}
+
+// normalized migrates an ADR 0006-era caps block to the ADR 0009 weight
+// budget. Applied by LoadRoster and again inside Allocate, because a Roster
+// built in code (a test, an embedding tool) never passes through LoadRoster —
+// and a zero budget makes Allocate silently allocate nothing, which is the
+// worst possible failure for a scheduler.
+func (c Caps) normalized() Caps {
+	if c.ReviewWeightPerNight <= 0 && c.PRsPerNight > 0 {
+		c.ReviewWeightPerNight = c.PRsPerNight
+	}
+	return c
 }
 
 func (r Roster) Repo(name string) (Repo, bool) {

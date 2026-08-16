@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -9,7 +10,7 @@ import (
 
 func testRoster() Roster {
 	return Roster{
-		Caps: Caps{PRsPerNight: 6, ConcurrentBuilders: 3, ReposPerNight: 2},
+		Caps: Caps{ReviewWeightPerNight: 8, ConcurrentBuilders: 3, ReposPerNight: 2},
 		Repos: []Repo{
 			{Name: "router", Path: "/r/router", Lang: "go"},
 			{Name: "brax", Path: "/r/brax", Lang: "python"},
@@ -157,7 +158,7 @@ func TestAllocate(t *testing.T) {
 
 func TestAllocateNeverExceedsNightlyPRCap(t *testing.T) {
 	r := testRoster()
-	r.Caps.PRsPerNight = 2
+	r.Caps.ReviewWeightPerNight = 2
 	r.Caps.ReposPerNight = 3
 	repos := map[string][]Bead{}
 	for _, p := range []string{"/r/router", "/r/brax", "/r/third"} {
@@ -271,5 +272,194 @@ func TestAllocateIsDeterministic(t *testing.T) {
 					run, i, plan.Assignments[i].Bead, want[i])
 			}
 		}
+	}
+}
+
+func TestWeight(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		want   int
+	}{
+		{"unlabelled is ordinary work", nil, DefaultWeight},
+		{"trivial", []string{"w:1"}, 1},
+		{"ordinary", []string{"w:2"}, 2},
+		{"hard", []string{"w:3"}, 3},
+		{"out of range is clamped, not rejected", []string{"w:9"}, DefaultWeight},
+		{"nonsense is clamped", []string{"w:big"}, DefaultWeight},
+		{"other labels ignored", []string{"lang:go", "w:1"}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Weight(Bead{Labels: tt.labels}); got != tt.want {
+				t.Errorf("Weight(%v) = %d, want %d", tt.labels, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAllocateBudgetsWeightNotCount(t *testing.T) {
+	// The ADR 0009 case: eight trivia or two hard changes, whichever the queue
+	// holds. A flat PR count could express neither.
+	t.Setenv("FLYWHEEL_HOME", t.TempDir())
+	r := testRoster()
+	r.Caps.ReviewWeightPerNight = 6
+	r.Caps.ConcurrentBuilders = 99
+	r.Caps.ReposPerNight = 9
+
+	light := []Bead{}
+	for i := 0; i < 8; i++ {
+		light = append(light, Bead{ID: fmt.Sprintf("l-%d", i), Status: "open", Type: "task",
+			Priority: 1, Labels: []string{"lang:go", "w:1"}})
+	}
+	plan, err := Allocate(r, fixtures(map[string][]Bead{"/r/router": light}), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Assignments) != 6 || plan.Allocated != 6 {
+		t.Errorf("trivia: %d PRs / weight %d, want 6/6", len(plan.Assignments), plan.Allocated)
+	}
+
+	heavy := []Bead{}
+	for i := 0; i < 8; i++ {
+		heavy = append(heavy, Bead{ID: fmt.Sprintf("h-%d", i), Status: "open", Type: "task",
+			Priority: 1, Labels: []string{"lang:go", "w:3"}})
+	}
+	plan, err = Allocate(r, fixtures(map[string][]Bead{"/r/router": heavy}), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Assignments) != 2 || plan.Allocated != 6 {
+		t.Errorf("hard changes: %d PRs / weight %d, want 2/6", len(plan.Assignments), plan.Allocated)
+	}
+}
+
+func TestAllocateSkipsTooHeavyButKeepsLookingForLighterWork(t *testing.T) {
+	// Budget left: 2. A w:3 bead cannot fit, but a w:1 behind it can — breaking
+	// out of the loop there would waste the remaining budget on nothing.
+	t.Setenv("FLYWHEEL_HOME", t.TempDir())
+	r := testRoster()
+	r.Caps.ReviewWeightPerNight = 2
+	plan, err := Allocate(r, fixtures(map[string][]Bead{"/r/router": {
+		{ID: "a-heavy", Status: "open", Type: "task", Priority: 1, Labels: []string{"lang:go", "w:3"}},
+		{ID: "b-light", Status: "open", Type: "task", Priority: 1, Labels: []string{"lang:go", "w:1"}},
+	}}), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Assignments) != 1 || plan.Assignments[0].Bead != "b-light" {
+		t.Fatalf("assignments = %+v, want just b-light", plan.Assignments)
+	}
+	found := false
+	for _, d := range plan.Declined {
+		if d.Bead == "a-heavy" && strings.Contains(d.Reason, "exceeds") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the too-heavy bead was not declined with a reason: %+v", plan.Declined)
+	}
+}
+
+func TestAllocateIsPressureSensitive(t *testing.T) {
+	// A full review queue reduces what tonight may start. This is the
+	// constraint enforcing itself rather than being remembered (fw-o28).
+	t.Setenv("FLYWHEEL_HOME", t.TempDir())
+	r := testRoster()
+	r.Caps.ReviewWeightPerNight = 8
+
+	beads := map[string][]Bead{"/r/router": {
+		{ID: "r-1", Status: "open", Type: "task", Priority: 1, Labels: []string{"lang:go", "w:3"}},
+	}}
+
+	// Queue already full: nothing starts.
+	plan, err := AllocateWithLoad(r, fixtures(beads), func(Repo) int { return 8 }, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Assignments) != 0 {
+		t.Errorf("started work with a full review queue: %+v", plan.Assignments)
+	}
+	if len(plan.Declined) == 0 || !strings.Contains(plan.Declined[0].Reason, "review queue is full") {
+		t.Errorf("did not explain why nothing started: %+v", plan.Declined)
+	}
+
+	// Queue clear: the same bead is allocatable.
+	plan, err = AllocateWithLoad(r, fixtures(beads), func(Repo) int { return 0 }, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Assignments) != 1 {
+		t.Fatalf("clear queue allocated %d, want 1", len(plan.Assignments))
+	}
+	if plan.InReview != 0 || plan.Budget != 8 {
+		t.Errorf("accounting wrong: inReview=%d budget=%d", plan.InReview, plan.Budget)
+	}
+}
+
+func TestAllocateReportsEveryRepoExactlyOnce(t *testing.T) {
+	// fw-oef.11: a repo with no ready work was invisible, and silence reads as
+	// "nothing to say" when it should read as "queue empty here".
+	t.Setenv("FLYWHEEL_HOME", t.TempDir())
+	r := testRoster()
+	plan, err := Allocate(r, fixtures(map[string][]Bead{
+		"/r/router": {{ID: "r-1", Status: "open", Type: "task", Priority: 1, Labels: []string{"lang:go"}}},
+	}), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int{}
+	for _, a := range plan.Assignments {
+		seen[a.Repo]++
+	}
+	for _, d := range plan.Declined {
+		if d.Repo != "" {
+			seen[d.Repo]++
+		}
+	}
+	for _, repo := range r.Repos {
+		if seen[repo.Name] == 0 {
+			t.Errorf("%s appeared nowhere in the plan", repo.Name)
+		}
+	}
+}
+
+func TestLoadRosterMigratesPRsPerNightToWeight(t *testing.T) {
+	dir := t.TempDir()
+	p := dir + "/roster.json"
+	if err := writeFile(p, `{"caps":{"prs_per_night":6,"concurrent_builders":3,"repos_per_night":2},
+	  "repos":[],"agents":[]}`); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRoster(p)
+	if err != nil {
+		t.Fatalf("an ADR 0006-era roster should still load: %v", err)
+	}
+	if r.Caps.ReviewWeightPerNight != 6 {
+		t.Errorf("migrated budget = %d, want 6", r.Caps.ReviewWeightPerNight)
+	}
+}
+
+func TestAllocateRefusesAZeroBudget(t *testing.T) {
+	// A scheduler that silently does no work looks identical to one with an
+	// empty queue. Found by a test that built Caps directly and bypassed the
+	// migration in LoadRoster.
+	t.Setenv("FLYWHEEL_HOME", t.TempDir())
+	r := testRoster()
+	r.Caps = Caps{ConcurrentBuilders: 3, ReposPerNight: 2} // no budget at all
+	_, err := Allocate(r, fixtures(nil), base)
+	if err == nil {
+		t.Fatal("allocated with no budget instead of refusing")
+	}
+	if !strings.Contains(err.Error(), "ADR 0009") {
+		t.Errorf("error does not point at the decision: %v", err)
+	}
+}
+
+func TestCapsNormalizeMigratesInCode(t *testing.T) {
+	// A Roster built in code never passes through LoadRoster.
+	got := Caps{PRsPerNight: 6, ConcurrentBuilders: 3, ReposPerNight: 2}.normalized()
+	if got.ReviewWeightPerNight != 6 {
+		t.Errorf("in-code migration failed: %+v", got)
 	}
 }
