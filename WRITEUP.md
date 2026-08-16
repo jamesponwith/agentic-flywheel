@@ -113,14 +113,24 @@ well-built loop manufactures a surprising amount of it.
 
 ## What I still can't tell you
 
-Whether any of this is *worth* it, in numbers. I can tell you the router
-shipped in eleven gated PRs and the bootstrap took 2m55s. I can't yet tell
-you what an agent-built feature costs in tokens, what fraction of PRs land
-green first time, how much rework a change takes, or whether the AI reviewer
-catches more than it costs.
+Whether any of this is *worth* it, in full. Some of it I can now answer,
+because the dashboard grew a second panel pointed at the agents instead of
+the code:
 
-Nobody publishes those numbers. The flywheel is already generating them and
-throwing them away, so the next stage of this project is a second dashboard
-next to the DORA one — the same public-by-default treatment, pointed at the
-agents instead of the code. That's the number I actually want, and it's the
-one I'd want from anyone else claiming agentic development works.
+- **First-pass gate rate** — 100% on the router (13/13), 96% on the tennis
+  agent (24/25). PRs that were green on their first CI run.
+- **Rework** — median zero commits after a PR opened, across both.
+
+Those are better than I expected, and I distrust them slightly for that
+reason: a solo repo has no reviewer to send work back, so "no rework" partly
+measures the absence of a second opinion rather than the presence of quality.
+
+What I still can't tell you: what an agent-built feature costs in tokens,
+and whether the AI reviewer catches more than it costs. The first needs cost
+accounting the audit log doesn't do yet. The second needs a ledger of review
+findings and what became of them — including the rejected ones, because a
+record of only the good calls can't produce a false-positive rate.
+
+Both are built or building. Nobody publishes these numbers, which is exactly
+why I want them public — they're the numbers I'd want from anyone else
+claiming agentic development works.
