@@ -93,6 +93,7 @@ func TestHydrate(t *testing.T) {
 			}
 
 			ops := hydrateOps{
+				head: func(string) string { return "same" }, // no commit made
 				readable: func(p string) error {
 					if readable[p] {
 						return nil
@@ -206,5 +207,87 @@ func TestHydrateWarnsWhenItDirtiesTrackedFiles(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Detail, "WARNING") || !strings.Contains(got[0].Detail, "config.yaml") {
 		t.Errorf("dirtied a tracked file without saying so: %q", got[0].Detail)
+	}
+}
+
+func TestHydrateDetectsACommitItCaused(t *testing.T) {
+	// The fw-oef.12 bug. `bd init` rewrites CLAUDE.md/AGENTS.md and beads' git
+	// hooks commit them, so the dirty check sees a clean tree and says nothing.
+	// It happened twice for real; once it reverted a merged PR, and once it
+	// reached an open PR and passed CI.
+	r, paths := hydrateFixture(t, map[string][2]bool{"repo": {false, true}})
+	readable := map[string]bool{paths["repo"]: false}
+	head := "aaaaaaaaaaaa"
+
+	got := Hydrate(r, hydrateOps{
+		readable: func(p string) error {
+			if readable[p] {
+				return nil
+			}
+			return errNotFound{"nope"}
+		},
+		initDB: func(p string) error {
+			head = "bbbbbbbbbbbb" // beads' hooks commit during init
+			return nil
+		},
+		importDB: func(p, _ string) error { readable[p] = true; return nil },
+		dirty:    func(string) []string { return nil }, // tree is clean: hooks committed
+		head:     func(string) string { return head },
+	})
+
+	if got[0].Action != "mutated" {
+		t.Fatalf("action = %q, want mutated — a commit we did not ask for is not a success", got[0].Action)
+	}
+	if !strings.Contains(got[0].Detail, "COMMITTED") || !strings.Contains(got[0].Detail, "aaaaaaaa") {
+		t.Errorf("detail does not name the commit range: %q", got[0].Detail)
+	}
+	if strings.Contains(summarize(got), "1 hydrated") {
+		t.Error("a repo that got mutated was counted as cleanly hydrated")
+	}
+	if !strings.Contains(summarize(got), "1 needing attention") {
+		t.Errorf("mutation not counted as needing attention: %q", summarize(got))
+	}
+}
+
+func TestHydrateStaysQuietWhenHeadDoesNotMove(t *testing.T) {
+	// The ordinary case must not become noisy: a hydrate that only creates the
+	// gitignored database changes no commit and should report plain success.
+	r, paths := hydrateFixture(t, map[string][2]bool{"repo": {false, true}})
+	readable := map[string]bool{paths["repo"]: false}
+	got := Hydrate(r, hydrateOps{
+		readable: func(p string) error {
+			if readable[p] {
+				return nil
+			}
+			return errNotFound{"nope"}
+		},
+		initDB:   func(string) error { return nil },
+		importDB: func(p, _ string) error { readable[p] = true; return nil },
+		dirty:    func(string) []string { return nil },
+		head:     func(string) string { return "unchanged" },
+	})
+	if got[0].Action != "hydrated" {
+		t.Errorf("action = %q, want hydrated", got[0].Action)
+	}
+}
+
+func TestHydrateHandlesNonGitDirectories(t *testing.T) {
+	// gitHead returns "" outside a git repo; that must not read as a mutation.
+	r, paths := hydrateFixture(t, map[string][2]bool{"repo": {false, true}})
+	readable := map[string]bool{paths["repo"]: false}
+	got := Hydrate(r, hydrateOps{
+		readable: func(p string) error {
+			if readable[p] {
+				return nil
+			}
+			return errNotFound{"nope"}
+		},
+		initDB:   func(string) error { return nil },
+		importDB: func(p, _ string) error { readable[p] = true; return nil },
+		dirty:    func(string) []string { return nil },
+		head:     func(string) string { return "" },
+	})
+	if got[0].Action != "hydrated" {
+		t.Errorf("action = %q, want hydrated — a non-git dir is not a mutation", got[0].Action)
 	}
 }

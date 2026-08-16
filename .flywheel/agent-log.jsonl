@@ -8,3 +8,5 @@
 {"ts":"2026-08-15T21:44:27Z","event":"bead.branch_ready","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","branch":"bead/fw-oef.8","commit":"5fb5dba","gate":"green"}
 {"ts":"2026-08-15T21:52:15Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","pr":"1","url":"https://github.com/jamesponwith/agentic-flywheel/pull/1"}
 {"ts":"2026-08-15T21:58:03Z","event":"bead.gate_green","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","pr":"1","unit":"pass","conformance":"pass","duration":"1m55s"}
+{"ts":"2026-08-16T15:43:12Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.12"}
+{"ts":"2026-08-16T15:45:27Z","event":"bead.branch_ready","agent":"unknown","repo":"agentic-flywheel","bead":"fw-oef.12","branch":"bead/fw-oef.12","gate":"green"}
