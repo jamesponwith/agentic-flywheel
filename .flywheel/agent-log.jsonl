@@ -11,3 +11,7 @@
 {"ts":"2026-08-16T15:43:12Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.12"}
 {"ts":"2026-08-16T15:45:27Z","event":"bead.branch_ready","agent":"unknown","repo":"agentic-flywheel","bead":"fw-oef.12","branch":"bead/fw-oef.12","gate":"green"}
 {"ts":"2026-08-16T15:47:19Z","event":"bead.closed","agent":"unknown","repo":"agentic-flywheel","bead":"fw-oef.12","pr":"9"}
+{"ts":"2026-08-16T17:34:07Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"verifying run respects the switch"}
+{"ts":"2026-08-16T17:34:07Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
+{"ts":"2026-08-16T17:34:07Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"fleet","reason":"global"}
+{"ts":"2026-08-16T17:34:07Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"fleet"}

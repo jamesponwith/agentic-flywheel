@@ -10,6 +10,7 @@
 //	fleet hydrate                               make every repo's beads readable
 //	fleet bypasses                              gates that got skipped, and by how much
 //	fleet doctor                                which stages each repo is missing
+//	fleet run                                   allocate, then spawn builders (needs -execute)
 package main
 
 import (
@@ -36,6 +37,8 @@ func main() {
 	since := fs.String("since", "", "only consider history since this git date (e.g. 30.days)")
 	source := fs.String("source", "", "template repo to copy missing artifacts from (doctor -fix)")
 	fix := fs.Bool("fix", false, "install missing artifacts from -source; never overwrites")
+	execute := fs.Bool("execute", false, "actually spawn builders (default is a dry run)")
+	perBuilder := fs.Duration("per-builder", DefaultRunOpts().PerBuilder, "wall-clock cap per builder")
 
 	// Subcommands taking a bead id read it before the flags.
 	var bead string
@@ -77,6 +80,8 @@ func main() {
 		err = doBypasses(*rosterPath, *since, *asJSON)
 	case "doctor":
 		err = doDoctor(*rosterPath, *source, *fix, *asJSON)
+	case "run":
+		err = doRun(*rosterPath, *execute, *perBuilder, *asJSON)
 	default:
 		usage()
 		os.Exit(2)
@@ -317,6 +322,57 @@ func doDoctor(rosterPath, source string, fix, asJSON bool) error {
 	return nil
 }
 
+func doRun(rosterPath string, execute bool, perBuilder time.Duration, asJSON bool) error {
+	r, err := LoadRoster(rosterPath)
+	if err != nil {
+		return err
+	}
+	plan, err := AllocateWithLoad(r, func(p string) bdClient {
+		return bdClient{dir: p, run: execBD}
+	}, ghReviewLoad, time.Now())
+	if err != nil {
+		return err
+	}
+	if plan.Stopped != "" {
+		fmt.Printf("HALTED — kill switch set (%s)\n", plan.Stopped)
+		return nil
+	}
+	if len(plan.Assignments) == 0 {
+		fmt.Println("nothing to do")
+		for _, d := range plan.Declined {
+			fmt.Printf("  %-22s %s\n", d.Repo, d.Reason)
+		}
+		return nil
+	}
+
+	opts := DefaultRunOpts()
+	opts.Execute = execute
+	opts.PerBuilder = perBuilder
+	opts.Concurrency = r.Caps.ConcurrentBuilders
+
+	fmt.Printf("%d assignment(s), weight %d/%d", len(plan.Assignments), plan.Allocated+plan.InReview, plan.Budget)
+	if !execute {
+		fmt.Print(" — DRY RUN, pass -execute to spawn builders")
+	}
+	fmt.Println()
+	for _, a := range plan.Assignments {
+		fmt.Printf("  %-22s %-12s w%d → %s\n", a.Repo, a.Bead, a.Weight, a.Title)
+	}
+	fmt.Println()
+
+	builders, err := Run(r, plan, opts)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(builders)
+	}
+	fmt.Println(Digest(builders))
+	return nil
+}
+
 func defaultRoster() string {
 	if p := os.Getenv("FLEET_ROSTER"); p != "" {
 		return p
@@ -342,5 +398,6 @@ func usage() {
   fleet hydrate [-roster PATH] [-json]
   fleet bypasses [-roster PATH] [-since 30.days] [-json]
   fleet doctor [-roster PATH] [-fix -source PATH] [-json]
+  fleet run [-roster PATH] [-execute] [-per-builder 25m] [-json]
 `)
 }
