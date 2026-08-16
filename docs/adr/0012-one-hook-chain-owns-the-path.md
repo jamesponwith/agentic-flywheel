@@ -18,9 +18,21 @@ the whole time because the config file was correct.
 
 ## Decision
 
-Neither tool owns the path. `.githooks/` does, and it calls both: beads' hook
-first, then lefthook. `tools/flywheel/install-hooks.sh` sets `core.hooksPath`
-and installs lefthook, and is run once per clone.
+**lefthook owns `.git/hooks`; beads is invoked as a declared step.**
+
+The first attempt gave the path to a neutral `.githooks/` directory. That
+failed within hours, and instructively: beads *follows* `core.hooksPath` and
+installs its own hooks wherever it points, so it renamed the chain script to
+`pre-commit.old` and installed no replacement — leaving no pre-commit hook at
+all. A neutral directory is not neutral if one tool writes to whatever the
+setting names.
+
+So ownership is inverted rather than shared. `core.hooksPath` stays unset,
+`lefthook install` writes `.git/hooks`, and `lefthook.yml` declares a `beads`
+command that calls `.beads/hooks/pre-commit`. One owner, one path, the other
+tool called explicitly.
+
+`tools/flywheel/install-hooks.sh` runs `lefthook install` once per clone.
 
 A missing lefthook **warns loudly** rather than passing silently. A gate that
 says nothing when it is absent is how this repo shipped a decorative one.
@@ -31,7 +43,11 @@ The Build gate is real — verified by committing deliberately unformatted code
 and watching it be rejected, then committing clean code and watching it pass.
 It runs in ~0.6s, which happens to match the claim that was previously untrue.
 
-Harder: the chain is one more file to keep working, and adding a third hook
-system means editing it. That is the cost of the two systems being unable to
+This was caught by the AI review panel on its first genuine run — it reported
+"hooksPath points at .githooks but no pre-commit is committed there; Build gate
+still never runs", which was exactly right. The stage that had been decorative
+all project found the bug in its own repair.
+
+Harder: adding a third hook system means declaring it in lefthook.yml. That is the cost of the two systems being unable to
 coexist on one path, and it is cheaper than the alternative — which was a gate
 nobody could tell was dead.

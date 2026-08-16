@@ -4,6 +4,25 @@
 pre-commit:
   parallel: true
   commands:
+    # beads follows core.hooksPath and installs ITS hooks wherever it points.
+    # A chain directory was clobbered that way and the pre-commit hook vanished
+    # entirely, hours after being "fixed". So lefthook owns .git/hooks and beads
+    # is invoked as a declared step instead: one owner, one path (ADR 0012).
+    beads:
+      run: |
+        h="$(git rev-parse --show-toplevel)/.beads/hooks/pre-commit"
+        [ -x "$h" ] && "$h" || true
+    # A commit mid-rebase may not build even when neither endpoint is broken.
+    # Skipping is recorded rather than silent, because an unmeasured bypass is
+    # a rule that is not in force. CI remains the real gate.
+    replay-guard:
+      run: |
+        for f in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD; do
+          if [ -e "$(git rev-parse --git-path $f)" ]; then
+            echo "pre-commit: replay in progress ($f) — CI is the gate here"
+            tools/flywheel/guard.sh log gate.skipped reason="$f" 2>/dev/null || true
+          fi
+        done
     gofmt:
       run: test -z "$(gofmt -l .)" || { echo "unformatted:"; gofmt -l .; exit 1; }
     vet:

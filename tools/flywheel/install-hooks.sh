@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
-# Wire the hook chain and install what it needs (ADR 0012).
+# Wire the Build gate. Run once per clone (ADR 0012).
 #
-# Run once per clone. `fleet doctor` reports repos where it has not been run.
+# lefthook owns .git/hooks; beads is a declared step inside lefthook.yml.
+# core.hooksPath is deliberately left unset — beads installs its hooks wherever
+# it points, which is how a previous attempt lost its pre-commit hook entirely.
 set -euo pipefail
-root=$(git rev-parse --show-toplevel)
-cd "$root"
+cd "$(git rev-parse --show-toplevel)"
 
-git config core.hooksPath .githooks
-echo "core.hooksPath -> .githooks"
+if [ -n "$(git config core.hooksPath || true)" ]; then
+  echo "unsetting core.hooksPath so lefthook owns .git/hooks"
+  git config --unset core.hooksPath
+fi
 
-if command -v lefthook >/dev/null; then
-  echo "lefthook: already installed ($(command -v lefthook))"
-else
-  echo "lefthook: installing…"
+command -v lefthook >/dev/null || {
+  echo "installing lefthook…"
   go install github.com/evilmartians/lefthook@latest
-  echo "lefthook: installed to $(go env GOPATH)/bin — ensure that is on PATH"
-fi
+  export PATH="$(go env GOPATH)/bin:$PATH"
+}
+lefthook install
 
-# Prove it, rather than trusting it. A gate you have not watched fail is a gate
-# you have not got.
-echo "verifying the gate actually rejects bad input…"
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-printf 'package main\nfunc  Bad( ){}\n' > "$tmp/bad.go"
-if gofmt -l "$tmp" | grep -q bad.go; then
-  echo "  gofmt detects unformatted Go: OK"
-else
-  echo "  WARNING: gofmt did not flag deliberately bad input" >&2
+# Prove it rejects, rather than trusting that it would. A gate you have not
+# watched fail is a gate you have not got.
+tmp=probe_$$.go
+printf 'package main\n\nfunc  Bad( X ) {}\n' > "$tmp"
+git add "$tmp"
+if git commit -q -m "probe: must be rejected" >/dev/null 2>&1; then
+  git reset -q --hard HEAD~1
+  echo "FAIL: the gate accepted deliberately unformatted code" >&2
+  exit 1
 fi
-echo "done — commit something unformatted to confirm the hook rejects it"
+git reset -q HEAD "$tmp" 2>/dev/null || true
+rm -f "$tmp"
+echo "verified: the gate rejects unformatted code"
