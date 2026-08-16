@@ -1,0 +1,94 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>flywheel fleet</title>
+<style>
+body{background:#0b0e0c;color:#c7d0c9;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:960px;margin:2rem auto;padding:0 1rem}
+h1{color:#7ee787;font-size:16px;font-weight:600}h1::before{content:"$ ";color:#8b949e}
+p.note{color:#8b949e;margin:.25rem 0 1.5rem}
+table{border-collapse:collapse;width:100%;margin-bottom:2rem}
+th{text-align:left;color:#8b949e;font-weight:400;border-bottom:1px solid #1c231e;padding:.5rem .75rem .5rem 0;font-size:12px}
+td{padding:.5rem .75rem .5rem 0;border-bottom:1px solid #11150f}
+td.n{color:#7ee787}
+td.dim{color:#484f4a}
+a{color:#7ee787}
+footer{color:#30363d;margin-top:2rem}
+</style>
+<h1>flywheel fleet</h1>
+<p class="note">
+  Every repo in the flywheel, from each one's committed <code>docs/dora.json</code>.
+  No backend — the git history of those files is the trend line.
+</p>
+
+<h2 style="color:#7ee787;font-size:14px">delivery</h2>
+<table id="dora"><thead><tr>
+  <th>repo</th><th>releases</th><th>per week</th><th>lead time</th><th>CFR</th><th>MTTR</th><th>snapshot</th>
+</tr></thead><tbody></tbody></table>
+
+<h2 style="color:#7ee787;font-size:14px">agents</h2>
+<p class="note">How the work got done, not just what shipped.</p>
+<table id="agent"><thead><tr>
+  <th>repo</th><th>first-pass gate</th><th>rework</th><th>round-trips</th><th>autonomous PRs</th><th>merged untouched</th>
+</tr></thead><tbody></tbody></table>
+
+<footer>weekly snapshots by learn.yml · <span id="count"></span></footer>
+<script>
+// Each repo publishes its own snapshot; this page is only a join over them.
+// Adding a repo to the fleet means adding one line here.
+var REPOS = [
+  "jamesponwith/llm-resiliency-router",
+  "jamesponwith/brax-tennis-rl",
+  "jamesponwith/flywheel-template",
+  "jamesponwith/flywheel-template-py",
+  "jamesponwith/agentic-flywheel"
+];
+
+function cell(text, cls){ return "<td class='" + (cls || "") + "'>" + text + "</td>"; }
+function num(v, unit){ return (v || v === 0) ? v.toFixed(1) + unit : "n/a"; }
+
+var loaded = 0, missing = [];
+REPOS.forEach(function(repo){
+  var name = repo.split("/")[1];
+  fetch("https://raw.githubusercontent.com/" + repo + "/main/docs/dora.json")
+    .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function(d){
+      loaded++;
+      var df = d.deploy_frequency, lt = d.lead_time_hours,
+          cf = d.change_failure_rate, mt = d.mttr_hours;
+      var row = "<tr>" + cell("<a href='https://github.com/" + repo + "'>" + name + "</a>") +
+        cell(df.releases_total, "n") + cell(num(df.per_week, ""), "n") +
+        cell(num(lt.median, "h"), "n") +
+        cell(cf.releases ? (cf.rate * 100).toFixed(0) + "%" : "n/a", "n") +
+        cell(mt.samples ? num(mt.median, "h") : "n/a", "n") +
+        cell((d.generated_at || "").slice(0, 10), "dim") + "</tr>";
+      document.querySelector("#dora tbody").insertAdjacentHTML("beforeend", row);
+
+      // Agent metrics are optional — a repo whose snapshot predates Learn v2
+      // simply does not appear in the second table rather than breaking it.
+      var a = d.agent;
+      if (a) {
+        var arow = "<tr>" + cell(name) +
+          cell(a.first_pass_gate.total ? (a.first_pass_gate.rate*100).toFixed(0) + "% (" +
+               a.first_pass_gate.green + "/" + a.first_pass_gate.total + ")" : "n/a", "n") +
+          cell(a.rework_commits_after_open.median, "n") +
+          cell(a.review_round_trips.median, "n") +
+          cell(a.autonomous_prs.opened, "n") +
+          cell(a.autonomous_prs.opened ? (a.autonomous_prs.clean_rate*100).toFixed(0) + "%" : "n/a", "n") +
+          "</tr>";
+        document.querySelector("#agent tbody").insertAdjacentHTML("beforeend", arow);
+      }
+    })
+    .catch(function(){
+      // A repo with no snapshot yet is reported, not hidden. Silence would
+      // read as "this repo has nothing to show".
+      missing.push(name);
+      document.querySelector("#dora tbody").insertAdjacentHTML("beforeend",
+        "<tr>" + cell(name, "dim") + "<td class='dim' colspan='6'>no snapshot yet</td></tr>");
+    })
+    .finally(function(){
+      document.getElementById("count").textContent =
+        loaded + "/" + REPOS.length + " reporting" +
+        (missing.length ? " · awaiting: " + missing.join(", ") : "");
+    });
+});
+</script>
