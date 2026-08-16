@@ -10,7 +10,25 @@ fleet release <bead> -agent NAME            give it back
 fleet reclaim                               sweep expired leases back to ready
 fleet status                                who holds what, across the fleet
 fleet allocate                              tonight's plan (prints, never spawns)
+fleet hydrate                               make every repo's beads readable
 ```
+
+## Why hydrate exists
+
+The first real `fleet allocate` across all five repos declined
+llm-resiliency-router with "no beads database found". Its `.beads/issues.jsonl`
+is committed but the Dolt database is gitignored, so a freshly cloned instance
+has beads on disk that `bd` cannot read — and the coordinator sees an empty
+queue where there is real work.
+
+Upstream guidance is to sync with `bd dolt pull` and avoid `bd import` in normal
+operation. That is right, and it does not apply here: the remotes carry no
+`refs/dolt/*` at all, so the committed JSONL is the only durable copy. This is
+the bootstrap-a-missing-database case, and it runs once per clone.
+
+`hydrate` is idempotent, skips paused repos, never touches an existing database,
+verifies the repo is *actually* readable afterwards rather than trusting that
+the commands ran, and warns when `bd init` leaves tracked files modified.
 
 ## Why leases
 
