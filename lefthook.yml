@@ -20,7 +20,24 @@ pre-commit:
 pre-push:
   commands:
     ai-review:
-      # Three lenses, findings recorded in .flywheel/review.jsonl. Advisory:
-      # `|| true` means a review that fails never blocks a push. Skips silently
-      # if claude is not installed (template ADR 0002).
-      run: command -v claude >/dev/null || exit 0; claude -p "/flywheel-review origin/main...HEAD" || true
+      # Three lenses, findings recorded in .flywheel/review.jsonl (ADR 0002).
+      #
+      # `</dev/null` is load-bearing: git hands a pre-push hook the ref list on
+      # stdin, which the agent CLI then reads instead of its prompt and dies
+      # with "Input must be provided". That failure was swallowed by `|| true`
+      # for the panel's entire life, so the review never once ran and the empty
+      # ledger was the only tell.
+      #
+      # Still advisory, but no longer silent: a reviewer that could not RUN is
+      # reported, distinctly from a reviewer that ran and found nothing. A hook
+      # that cannot fail cannot be trusted.
+      run: |
+        command -v "${FLYWHEEL_AGENT_CMD:-claude}" >/dev/null || exit 0
+        count() { [ -f .flywheel/review.jsonl ] && wc -l < .flywheel/review.jsonl || echo 0; }
+        before=$(count)
+        if ! "${FLYWHEEL_AGENT_CMD:-claude}" -p "/flywheel-review origin/main...HEAD" </dev/null; then
+          echo "warning: review did not run (agent invocation failed) — this is not 'no findings'" >&2
+          exit 0
+        fi
+        after=$(count)
+        [ "$after" -gt "$before" ] && echo "review: $((after - before)) finding(s) recorded" || echo "review: ran, no findings"
