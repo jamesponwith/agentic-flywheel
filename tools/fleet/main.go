@@ -9,6 +9,7 @@
 //	fleet allocate                              tonight's plan (prints, never spawns)
 //	fleet hydrate                               make every repo's beads readable
 //	fleet bypasses                              gates that got skipped, and by how much
+//	fleet doctor                                which stages each repo is missing
 package main
 
 import (
@@ -33,6 +34,8 @@ func main() {
 	rosterPath := fs.String("roster", defaultRoster(), "path to roster.json")
 	asJSON := fs.Bool("json", false, "JSON output")
 	since := fs.String("since", "", "only consider history since this git date (e.g. 30.days)")
+	source := fs.String("source", "", "template repo to copy missing artifacts from (doctor -fix)")
+	fix := fs.Bool("fix", false, "install missing artifacts from -source; never overwrites")
 
 	// Subcommands taking a bead id read it before the flags.
 	var bead string
@@ -72,6 +75,8 @@ func main() {
 		err = doHydrate(*rosterPath, *asJSON)
 	case "bypasses":
 		err = doBypasses(*rosterPath, *since, *asJSON)
+	case "doctor":
+		err = doDoctor(*rosterPath, *source, *fix, *asJSON)
 	default:
 		usage()
 		os.Exit(2)
@@ -259,6 +264,46 @@ func doBypasses(rosterPath, since string, asJSON bool) error {
 	return nil
 }
 
+func doDoctor(rosterPath, source string, fix, asJSON bool) error {
+	r, err := LoadRoster(rosterPath)
+	if err != nil {
+		return err
+	}
+	var all []Diagnosis
+	for _, repo := range r.Repos {
+		if _, err := os.Stat(repo.Path); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s: not on this machine\n", repo.Name)
+			continue
+		}
+		d := Diagnose(repo)
+		all = append(all, d)
+		if !asJSON {
+			fmt.Println(d)
+		}
+		if fix && len(d.Missing) > 0 {
+			if source == "" {
+				return fmt.Errorf("-fix needs -source pointing at a template repo")
+			}
+			installed, err := Install(repo, source, d.Missing)
+			if err != nil {
+				return err
+			}
+			for _, p := range installed {
+				fmt.Printf("    + installed %s\n", p)
+			}
+			if len(installed) == 0 {
+				fmt.Println("    (nothing installable from the source)")
+			}
+		}
+	}
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(all)
+	}
+	return nil
+}
+
 func defaultRoster() string {
 	if p := os.Getenv("FLEET_ROSTER"); p != "" {
 		return p
@@ -283,5 +328,6 @@ func usage() {
   fleet allocate [-roster PATH] [-json]
   fleet hydrate [-roster PATH] [-json]
   fleet bypasses [-roster PATH] [-since 30.days] [-json]
+  fleet doctor [-roster PATH] [-fix -source PATH] [-json]
 `)
 }
