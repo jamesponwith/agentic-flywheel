@@ -12,12 +12,12 @@ Almost all of it. The catch is ruthlessness about what each stage costs to
 keep running. This is the working system:
 [flywheel-template](https://github.com/jamesponwith/flywheel-template) (Go)
 and [flywheel-template-py](https://github.com/jamesponwith/flywheel-template-py)
-(Python), template repos carrying all five stages, plus two pilot projects
+(Python), template repos carrying all six stages, plus two pilot projects
 built entirely inside them — an
 [LLM resiliency router](https://github.com/jamesponwith/llm-resiliency-router)
 and a [reinforcement-learning tennis agent](https://github.com/jamesponwith/brax-tennis-rl).
 
-## The five stages, translated
+## The six stages, translated
 
 **Intent.** Same artifacts, smaller. A SPEC.md per project. ADRs capped at
 20 lines. Issue tracking in [beads](https://github.com/steveyegge/beads)
@@ -41,6 +41,16 @@ hour-long training run.
 **Release.** Semver tag → goreleaser → binaries and changelog, 59 seconds
 end to end. A deploy script pulls the release asset and restarts a systemd
 unit. Verified against a real release the day it shipped.
+
+**Operate.** The stage I didn't know was missing until the metrics lied. An
+SLO file, a prober, and a `/healthz` endpoint that reports its version. A
+sustained breach files an incident; recovery closes it. Deploys smoke
+themselves and roll back if the smoke fails.
+
+At Capital One this stage was invisible to me because tenants ran the
+artifact and someone else owned its telemetry. Solo, nobody is watching
+unless something watches — and until something did, change-failure rate and
+MTTR were measuring how reliably I remembered to label a GitHub issue.
 
 **Learn.** ~150 lines of Go pull deploy frequency, lead time, change-failure
 rate, and MTTR from the GitHub API. A weekly Action commits the snapshot
@@ -70,15 +80,47 @@ signal.
 Adapted: AI review moved from the pipeline to the laptop. The component
 suite runs in-process against a chaos harness instead of docker-compose.
 
-Dropped: orchestration dashboards, agent fleets, inter-agent protocols. The
-personal version must stay cheap enough to actually use. Standing rule: if
-a gate gets bypassed twice, delete it or automate it — a
-documented-but-ignored process is worse than none.
+Dropped, then un-dropped: orchestration, agent fleets, inter-agent
+protocols. I ruled all three out at the start — that's the C1 version, and
+the personal one has to stay cheap enough to actually use.
+
+I was wrong, and the way I was wrong is the interesting part. The rule named
+a *category* but justified a *cost*. At one project, "don't orchestrate" and
+"stay cheap" pointed the same way. At five repos they point in opposite
+directions: the hand-work of keeping five queues moving is now the expensive
+option. So the ban became a budget — every stage declares what it costs in
+minutes and dollars per month, and anything over budget for two consecutive
+retros gets deleted. Fleets are priced, not prohibited.
+
+The constraint that actually binds turned out not to be compute. It's review
+capacity. Agents produce PRs faster than one person can read them properly,
+and an unreviewed merge is worse than an empty queue — so the fleet is sized
+to a review morning, not to a machine.
+
+Standing rule underneath all of it: if a gate gets bypassed twice, delete it
+or automate it. A documented-but-ignored process is worse than none.
 
 ## The part that surprised me
 
 The stages audit each other. CI caught a test race the local suite never
 hit. The AI reviewer flagged code the linter loved. A demo recording exposed
-a rendering bug no test would ever find. One person plus an agent doesn't
-get a team's diversity of eyes — but a well-built loop manufactures a
-surprising amount of it.
+a rendering bug no test would ever find. The coordinator's very first run
+across all five repos reported that it couldn't read one of them — which
+became a bead, which the agent loop then fixed.
+
+One person plus an agent doesn't get a team's diversity of eyes. A
+well-built loop manufactures a surprising amount of it.
+
+## What I still can't tell you
+
+Whether any of this is *worth* it, in numbers. I can tell you the router
+shipped in eleven gated PRs and the bootstrap took 2m55s. I can't yet tell
+you what an agent-built feature costs in tokens, what fraction of PRs land
+green first time, how much rework a change takes, or whether the AI reviewer
+catches more than it costs.
+
+Nobody publishes those numbers. The flywheel is already generating them and
+throwing them away, so the next stage of this project is a second dashboard
+next to the DORA one — the same public-by-default treatment, pointed at the
+agents instead of the code. That's the number I actually want, and it's the
+one I'd want from anyone else claiming agentic development works.
