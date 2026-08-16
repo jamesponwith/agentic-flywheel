@@ -29,6 +29,11 @@ tooling that runs *across* repos. Per-project tooling lives in the templates
 - Check `tools/flywheel/guard.sh check` before acting; it is the kill switch.
 - Claim work through `fleet claim`, not bare `bd update --claim` — a claim
   without a lease starves the queue if you die.
+- Anything expected to take more than one session gets a design note in the
+  bead's `--design` field first: signatures and boundaries, no prose (ADR 0008).
+- Agent-to-agent messages are `handoff`, `finding`, `escalate`, `status` and
+  nothing else; `handoff` and `escalate` require an ack (ADR 0007). If you are
+  stuck, `escalate` — do not guess confidently.
 - Reserve territory in blackbird before editing. No reservation, no edit.
 
 ## Commit protocol

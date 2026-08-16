@@ -6,6 +6,16 @@ on:
   pull_request:
 
 jobs:
+  # No bead, no build — checked rather than remembered. Advisory for now
+  # (ADR 0001: a gate goes blocking only once its noise level is known).
+  intent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: BASE_REF=origin/${{ github.base_ref }} tools/flywheel/bead-lint.sh
+
   unit:
     runs-on: ubuntu-latest
     steps:
