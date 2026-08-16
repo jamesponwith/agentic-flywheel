@@ -15,6 +15,7 @@ FLYWHEEL_HOME="${FLYWHEEL_HOME:-$HOME/.flywheel}"
 REPO_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 REPO_STATE="$REPO_DIR/.flywheel"
 LOG="$REPO_STATE/agent-log.jsonl"
+LEDGER="$REPO_STATE/review.jsonl"
 
 usage() {
   cat <<'USAGE'
@@ -25,6 +26,7 @@ usage: guard.sh <command>
   stop --fleet [r]   stop every agent in every repo
   resume [--fleet]   clear the corresponding stop file
   log <event> [k=v]  append an audit record
+  finding [k=v]      append a review finding to the review ledger
   status             show stop state and recent activity
 USAGE
 }
@@ -77,9 +79,34 @@ cmd_log() {
   } >> "$LOG"
 }
 
+# finding — append one review finding to .flywheel/review.jsonl.
+#
+# The ledger is the point: a review whose findings are never recorded can
+# never be shown to be worth its cost. Each finding gets a disposition later
+# (accepted | rejected | ignored) and, once Learn v2 lands, an escape verdict —
+# did anything the reviewer missed turn up in CI or production?
+#
+# Expected keys: lens, file, line, severity, claim, disposition.
+cmd_finding() {
+  mkdir -p "$REPO_STATE"
+  {
+    printf '{"ts":"%s","commit":"%s","branch":"%s","repo":"%s"' \
+      "$(date -u +%FT%TZ)" "$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+      "$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)" \
+      "$(basename "$REPO_DIR")"
+    for kv in "$@"; do
+      local k="${kv%%=*}" v="${kv#*=}"
+      v=${v//\\/\\\\}; v=${v//\"/\\\"}; v=${v//$'\n'/\\n}; v=${v//$'\t'/\\t}
+      printf ',"%s":"%s"' "$k" "$v"
+    done
+    printf '}\n'
+  } >> "$LEDGER"
+}
+
 cmd_status() {
   if cmd_check 2>/dev/null; then echo "state: RUNNABLE"; else echo "state: STOPPED"; cmd_check || true; fi
   echo "log:   $LOG"
+  if [ -f "$LEDGER" ]; then echo "review: $(wc -l < "$LEDGER" | tr -d ' ') findings recorded"; fi
   if [ -f "$LOG" ]; then
     echo "recent:"
     tail -5 "$LOG" | sed 's/^/  /'
@@ -93,6 +120,7 @@ case "${1:-}" in
   stop)   shift; cmd_stop "$@" ;;
   resume) shift; cmd_resume "$@" ;;
   log)    shift; cmd_log "$@" ;;
+  finding) shift; cmd_finding "$@" ;;
   status) shift; cmd_status ;;
   *)      usage; exit 2 ;;
 esac
