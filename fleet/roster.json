@@ -1,6 +1,8 @@
 {
   "_comment": "The fleet's constitution. Repo paths are relative to workspace_root ($FLYWHEEL_WORKSPACE, or ~/Workspace) so the roster is portable and says nothing about the host. Caps derive from review capacity, not compute (ADR 0006). Readable in ten seconds, diffable in review — keep it that way.",
   "workspace_root": "~/Workspace",
+  "_runner": "How a builder is invoked (ADR 0010). The agent is a role, not a product — swap cmd/args for a different CLI, or set FLYWHEEL_AGENT_CMD to override everywhere including shell hooks.",
+  "runner": { "cmd": "claude", "args": ["-p", "{prompt}"], "stdin": "none" },
   "caps": { "review_weight_per_night": 8, "concurrent_builders": 3, "repos_per_night": 2 },
   "repos": [
     { "name": "llm-resiliency-router", "path": "llm-resiliency-router", "lang": "go", "budget_usd_month": 20 },

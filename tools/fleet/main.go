@@ -349,6 +349,7 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, asJSON boo
 	opts.Execute = execute
 	opts.PerBuilder = perBuilder
 	opts.Concurrency = r.Caps.ConcurrentBuilders
+	opts.Runner = r.Runner
 
 	fmt.Printf("%d assignment(s), weight %d/%d", len(plan.Assignments), plan.Allocated+plan.InReview, plan.Budget)
 	if !execute {

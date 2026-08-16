@@ -2,8 +2,9 @@
 //
 // The coordinator allocates and never edits code (ADR 0006); this is the piece
 // that hands each assignment to a builder and gets out of the way. Every
-// builder is an isolated `claude -p "/flywheel-next <bead>"` in its own
-// worktree, bound by ADR 0003 — branch, commit, gate, PR, and stop.
+// builder runs the roster's declared agent on "/flywheel-next <bead>" in its
+// own worktree, bound by ADR 0003 — branch, commit, gate, PR, and stop. The
+// agent is a role, not a product (ADR 0010).
 //
 // Dry-run is the default. Spawning real agents requires -execute, because a
 // scheduler whose safe mode is "do it" is not a safe mode.
@@ -40,6 +41,7 @@ type RunOpts struct {
 	MaxTurns    int           // agent turn cap, so a confused builder stops
 	Concurrency int
 	LogDir      string
+	Runner      Runner // how to invoke an agent (ADR 0010)
 }
 
 func DefaultRunOpts() RunOpts {
@@ -127,11 +129,22 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 
 	// The builder is told exactly one thing: work this bead through the skill.
 	prompt := fmt.Sprintf("/flywheel-next %s", a.Bead)
-	args := []string{"-p", prompt}
-	if opts.MaxTurns > 0 {
+	runner := opts.Runner.resolved()
+	args := runner.argv(prompt)
+	if opts.MaxTurns > 0 && runner.Cmd == "claude" {
+		// A turn cap is not a universal concept; only pass it to a CLI known
+		// to have one. The wall-clock cap bounds every runner regardless.
 		args = append(args, "--max-turns", fmt.Sprint(opts.MaxTurns))
 	}
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd := exec.CommandContext(ctx, runner.Cmd, args...)
+	if runner.quietStdin() {
+		// The bug that kept the review panel dead for its whole life: an agent
+		// CLI reads inherited stdin instead of its prompt.
+		if devnull, err := os.Open(os.DevNull); err == nil {
+			defer devnull.Close()
+			cmd.Stdin = devnull
+		}
+	}
 	cmd.Dir = wt
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
