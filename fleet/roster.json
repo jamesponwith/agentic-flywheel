@@ -5,7 +5,7 @@
   "repos": [
     { "name": "llm-resiliency-router", "path": "llm-resiliency-router", "lang": "go", "budget_usd_month": 20 },
     { "name": "agentic-flywheel", "path": "agentic-flywheel", "lang": "go", "budget_usd_month": 15 },
-    { "name": "brax-tennis-rl", "path": "brax-tennis-rl", "lang": "python", "budget_usd_month": 20, "paused": true },
+    { "name": "brax-tennis-rl", "path": "brax-tennis-rl", "lang": "python", "budget_usd_month": 20 },
     { "name": "flywheel-template", "path": "flywheel-template", "lang": "go", "budget_usd_month": 10, "paused": true },
     { "name": "flywheel-template-py", "path": "flywheel-template-py", "lang": "python", "budget_usd_month": 10, "paused": true }
   ],
