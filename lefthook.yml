@@ -10,9 +10,12 @@ pre-commit:
       run: go vet ./...
     test:
       run: go test -short ./...
-    shellcheck:
+    shellsyntax:
       glob: "*.sh"
-      run: sh -n {staged_files}
+      # bash -n, not sh -n: these scripts declare bash and use [[ ]] and
+      # BASH_REMATCH. sh -n false-fails on them, and a gate that fails on
+      # correct code is one that gets bypassed.
+      run: bash -n {staged_files}
 
 pre-push:
   commands:
