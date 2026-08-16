@@ -17,4 +17,7 @@ pre-commit:
 pre-push:
   commands:
     ai-review:
-      run: command -v claude >/dev/null || exit 0; claude -p "/ponytail-review origin/main...HEAD" || true
+      # Three lenses, findings recorded in .flywheel/review.jsonl. Advisory:
+      # `|| true` means a review that fails never blocks a push. Skips silently
+      # if claude is not installed (template ADR 0002).
+      run: command -v claude >/dev/null || exit 0; claude -p "/flywheel-review origin/main...HEAD" || true
