@@ -27,8 +27,19 @@ operation. That is right, and it does not apply here: the remotes carry no
 the bootstrap-a-missing-database case, and it runs once per clone.
 
 `hydrate` is idempotent, skips paused repos, never touches an existing database,
-verifies the repo is *actually* readable afterwards rather than trusting that
-the commands ran, and warns when `bd init` leaves tracked files modified.
+and verifies the repo is *actually* readable afterwards rather than trusting
+that the commands ran.
+
+It also checks whether it **changed the repository**, which is not the same
+question as whether it left the tree dirty. `bd init` rewrites `CLAUDE.md`,
+`AGENTS.md` and `.claude/settings.json`, and beads installs git hooks that
+*commit* those changes — so a dirty-tree check finds nothing and reports
+success. That happened twice for real (`fw-oef.12`): once the uninvited commit
+reverted a merged PR, and once it contaminated an open PR that then passed CI,
+because nothing was broken — it simply was not what the PR claimed to be.
+
+hydrate now records HEAD before and after. A commit it did not ask for is
+reported as `mutated`, with the exact range to inspect, and exits non-zero.
 
 ## Why leases
 

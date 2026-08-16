@@ -33,12 +33,18 @@ type hydrateOps struct {
 	readable func(path string) error // can bd read this repo's beads?
 	initDB   func(path string) error
 	importDB func(path, jsonl string) error
-	// dirty reports tracked files modified under .beads/. `bd init` writes
-	// sync.remote into a config.yaml that some repos track, so hydrating can
-	// leave a working tree dirty. An unattended fleet that silently edits
-	// tracked files in repos it is only supposed to read is a fleet nobody
-	// should run; say so instead.
+	// dirty reports tracked files modified under .beads/.
 	dirty func(path string) []string
+	// head reports the current commit. Checked before and after, because the
+	// dirty check alone cannot see this: `bd init` rewrites CLAUDE.md,
+	// AGENTS.md and settings.json, and beads installs git hooks that COMMIT
+	// those changes — so by the time we look for a dirty tree there is none.
+	//
+	// This happened twice for real (fw-oef.12): both llm-resiliency-router and
+	// brax-tennis-rl gained an uninvited "bd init" commit, and one of them
+	// reverted a merged PR's changes. The second reached an open PR and passed
+	// CI, because nothing was broken — it simply was not what the PR claimed.
+	head func(path string) string
 }
 
 func liveHydrateOps() hydrateOps {
@@ -56,7 +62,19 @@ func liveHydrateOps() hydrateOps {
 			return err
 		},
 		dirty: gitDirtyBeads,
+		head:  gitHead,
 	}
+}
+
+// gitHead returns the current commit, or "" if this is not a git repo.
+func gitHead(path string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = path
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // gitDirtyBeads lists tracked files modified under .beads/ in a repo.
@@ -108,6 +126,13 @@ func Hydrate(r Roster, ops hydrateOps) []HydrateResult {
 			continue
 		}
 
+		// Record HEAD before touching anything, so a commit made by bd's own
+		// git hooks is detectable afterwards.
+		before := ""
+		if ops.head != nil {
+			before = ops.head(repo.Path)
+		}
+
 		if err := ops.initDB(repo.Path); err != nil {
 			out = append(out, HydrateResult{Repo: repo.Name, Action: "failed", Detail: "bd init: " + err.Error()})
 			continue
@@ -127,6 +152,18 @@ func Hydrate(r Roster, ops hydrateOps) []HydrateResult {
 		if ops.dirty != nil {
 			if files := ops.dirty(repo.Path); len(files) > 0 {
 				detail += fmt.Sprintf("; WARNING left tracked files modified: %s", strings.Join(files, ", "))
+			}
+		}
+		// The important check. A commit we did not ask for is a repository
+		// mutation, and it is silent: it survives CI and contaminates any
+		// branch cut afterwards.
+		if ops.head != nil && before != "" {
+			if after := ops.head(repo.Path); after != "" && after != before {
+				out = append(out, HydrateResult{Repo: repo.Name, Action: "mutated",
+					Detail: fmt.Sprintf("bd init COMMITTED to this repo: %s -> %s. "+
+						"Inspect and reset before cutting any branch — `git log %s..HEAD`",
+						before[:min(8, len(before))], after[:min(8, len(after))], before[:min(8, len(before))])})
+				continue
 			}
 		}
 		out = append(out, HydrateResult{Repo: repo.Name, Action: "hydrated", Detail: detail})

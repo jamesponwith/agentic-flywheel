@@ -207,11 +207,23 @@ func doHydrate(rosterPath string, asJSON bool) error {
 		fmt.Println(line)
 	}
 	fmt.Println(summarize(res))
+	// Non-zero so a scheduled run surfaces this instead of looking fine.
+	var unreadable, mutated int
 	for _, x := range res {
-		if x.Action == "failed" || x.Action == "skipped" {
-			// Non-zero so a scheduled run surfaces it instead of looking fine.
-			return fmt.Errorf("%d repo(s) still unreadable", countBad(res))
+		switch x.Action {
+		case "failed", "skipped":
+			unreadable++
+		case "mutated":
+			mutated++
 		}
+	}
+	switch {
+	case mutated > 0 && unreadable > 0:
+		return fmt.Errorf("%d repo(s) mutated by bd init, %d still unreadable", mutated, unreadable)
+	case mutated > 0:
+		return fmt.Errorf("%d repo(s) mutated by bd init — inspect before cutting a branch", mutated)
+	case unreadable > 0:
+		return fmt.Errorf("%d repo(s) still unreadable", unreadable)
 	}
 	return nil
 }
@@ -219,7 +231,7 @@ func doHydrate(rosterPath string, asJSON bool) error {
 func countBad(rs []HydrateResult) int {
 	n := 0
 	for _, r := range rs {
-		if r.Action == "failed" || r.Action == "skipped" {
+		if r.Action == "failed" || r.Action == "skipped" || r.Action == "mutated" {
 			n++
 		}
 	}
