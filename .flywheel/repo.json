@@ -1,0 +1,5 @@
+{
+  "_comment": "What this repo is, so doctor -self reports gaps it can actually act on. The flywheel's home is a coordinator and a spec, not a deployed service: there is nothing to probe for Operate and nothing to ship for Release. fleet is invoked with `go run`, not installed from a release. Declared rather than tolerated as a permanent red line — a checklist that is always partly wrong trains people to ignore it (fw-fsa.6/.8).",
+  "lang": "go",
+  "skip_stages": ["operate", "release"]
+}

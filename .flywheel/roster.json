@@ -1,24 +1,136 @@
 {
-  "_comment": "The fleet's constitution. Repo paths are relative to workspace_root ($FLYWHEEL_WORKSPACE, or ~/Workspace) so the roster is portable and says nothing about the host. Caps derive from review capacity, not compute (ADR 0006). Readable in ten seconds, diffable in review — keep it that way.",
+  "_comment": "The fleet's constitution. Repo paths are relative to workspace_root ($FLYWHEEL_WORKSPACE, or ~/Workspace) so the roster is portable and says nothing about the host. Caps derive from review capacity, not compute (ADR 0006). Readable in ten seconds, diffable in review \u2014 keep it that way.",
   "workspace_root": "~/Workspace",
-  "_runner": "How a builder is invoked (ADR 0010). The agent is a role, not a product — swap cmd/args for a different CLI, or set FLYWHEEL_AGENT_CMD to override everywhere including shell hooks.",
-  "runner": { "cmd": "claude", "args": ["-p", "{prompt}"], "stdin": "none" },
-  "caps": { "review_weight_per_night": 8, "concurrent_builders": 3, "repos_per_night": 2 },
+  "_runner": "How a builder is invoked (ADR 0010). The agent is a role, not a product \u2014 swap cmd/args for a different CLI, or set FLYWHEEL_AGENT_CMD to override everywhere including shell hooks.",
+  "runner": {
+    "cmd": "claude",
+    "args": [
+      "-p",
+      "{prompt}"
+    ],
+    "stdin": "none"
+  },
+  "caps": {
+    "review_weight_per_night": 8,
+    "concurrent_builders": 3,
+    "repos_per_night": 2
+  },
   "repos": [
-    { "name": "llm-resiliency-router", "path": "llm-resiliency-router", "lang": "go", "budget_usd_month": 20 },
-    { "name": "agentic-flywheel", "path": "agentic-flywheel", "lang": "go", "budget_usd_month": 15 },
-    { "name": "brax-tennis-rl", "path": "brax-tennis-rl", "lang": "python", "budget_usd_month": 20, "skip_stages": ["operate"] },
-    { "name": "flywheel-template", "path": "flywheel-template", "lang": "go", "budget_usd_month": 10, "paused": true, "role": "template" },
-    { "name": "flywheel-template-py", "path": "flywheel-template-py", "lang": "python", "budget_usd_month": 10, "paused": true, "role": "template" }
+    {
+      "name": "llm-resiliency-router",
+      "path": "llm-resiliency-router",
+      "lang": "go",
+      "budget_usd_month": 20
+    },
+    {
+      "name": "agentic-flywheel",
+      "path": "agentic-flywheel",
+      "lang": "go",
+      "budget_usd_month": 15,
+      "skip_stages": [
+        "operate",
+        "release"
+      ]
+    },
+    {
+      "name": "brax-tennis-rl",
+      "path": "brax-tennis-rl",
+      "lang": "python",
+      "budget_usd_month": 20,
+      "skip_stages": [
+        "operate"
+      ]
+    },
+    {
+      "name": "flywheel-template",
+      "path": "flywheel-template",
+      "lang": "go",
+      "budget_usd_month": 10,
+      "paused": true,
+      "role": "template"
+    },
+    {
+      "name": "flywheel-template-py",
+      "path": "flywheel-template-py",
+      "lang": "python",
+      "budget_usd_month": 10,
+      "paused": true,
+      "role": "template"
+    }
   ],
   "agents": [
-    { "name": "fleet/coordinator", "role": "coordinator", "repos": ["*"], "skills": [] },
-    { "name": "fleet/builder-go", "role": "builder", "repos": ["llm-resiliency-router", "agentic-flywheel", "flywheel-template"], "skills": ["go", "shell"] },
-    { "name": "fleet/builder-py", "role": "builder", "repos": ["brax-tennis-rl"], "skills": ["python", "jax", "rl"] },
-    { "name": "fleet/reviewer-correctness", "role": "reviewer", "repos": ["*"], "skills": [] },
-    { "name": "fleet/reviewer-security", "role": "reviewer", "repos": ["*"], "skills": [] },
-    { "name": "fleet/reviewer-ponytail", "role": "reviewer", "repos": ["*"], "skills": [] },
-    { "name": "fleet/operator", "role": "operator", "repos": ["llm-resiliency-router"], "skills": [] },
-    { "name": "fleet/retro", "role": "retro", "repos": ["*"], "skills": [] }
+    {
+      "name": "fleet/coordinator",
+      "role": "coordinator",
+      "repos": [
+        "*"
+      ],
+      "skills": []
+    },
+    {
+      "name": "fleet/builder-go",
+      "role": "builder",
+      "repos": [
+        "llm-resiliency-router",
+        "agentic-flywheel",
+        "flywheel-template"
+      ],
+      "skills": [
+        "go",
+        "shell"
+      ]
+    },
+    {
+      "name": "fleet/builder-py",
+      "role": "builder",
+      "repos": [
+        "brax-tennis-rl"
+      ],
+      "skills": [
+        "python",
+        "jax",
+        "rl"
+      ]
+    },
+    {
+      "name": "fleet/reviewer-correctness",
+      "role": "reviewer",
+      "repos": [
+        "*"
+      ],
+      "skills": []
+    },
+    {
+      "name": "fleet/reviewer-security",
+      "role": "reviewer",
+      "repos": [
+        "*"
+      ],
+      "skills": []
+    },
+    {
+      "name": "fleet/reviewer-ponytail",
+      "role": "reviewer",
+      "repos": [
+        "*"
+      ],
+      "skills": []
+    },
+    {
+      "name": "fleet/operator",
+      "role": "operator",
+      "repos": [
+        "llm-resiliency-router"
+      ],
+      "skills": []
+    },
+    {
+      "name": "fleet/retro",
+      "role": "retro",
+      "repos": [
+        "*"
+      ],
+      "skills": []
+    }
   ]
 }
