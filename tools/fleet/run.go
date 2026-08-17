@@ -37,16 +37,22 @@ type Builder struct {
 // RunOpts bounds a night. Every field here exists because something without it
 // would be unbounded.
 type RunOpts struct {
-	Execute     bool          // false = plan only; the default is not to act
-	PerBuilder  time.Duration // wall-clock cap per builder
-	MaxTurns    int           // agent turn cap, so a confused builder stops
+	Execute    bool          // false = plan only; the default is not to act
+	PerBuilder time.Duration // wall-clock cap per builder
+	// MaxTurns stops a confused builder circling. It is NOT the real bound —
+	// wall-clock is. Run 6 hit 60 turns after 14 minutes of genuine work and
+	// lost all of it, because reserve, design, write, test, gate, commit, push
+	// and PR do not fit in 60 turns. Set it high enough that only a loop trips
+	// it, and let PerBuilder be what actually bounds a run.
+	MaxTurns int
+
 	Concurrency int
 	LogDir      string
 	Runner      Runner // how to invoke an agent (ADR 0010)
 }
 
 func DefaultRunOpts() RunOpts {
-	return RunOpts{PerBuilder: 25 * time.Minute, MaxTurns: 60, Concurrency: 3, LogDir: ".flywheel/runs"}
+	return RunOpts{PerBuilder: 35 * time.Minute, MaxTurns: 300, Concurrency: 3, LogDir: ".flywheel/runs"}
 }
 
 // Run executes a plan. It re-checks the kill switch before every builder, not
