@@ -208,6 +208,20 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		b.Detail = fmt.Sprintf("%d commit(s), see %s", commits, logPath)
 	}
 	b.Commits = commits
+
+	// fw-lb8.7: a builder killed by the turn cap or wall-clock never runs the
+	// skill's abandon path, so the bead stays in_progress with no lease — and
+	// reclaim deliberately refuses unleased in-progress beads, because that
+	// rule protects a human's work. Nothing then recovers it and the next run
+	// reports "not allocatable". The spawner knows the outcome, so it restores.
+	if commits == 0 && b.Outcome != "green" {
+		bd := bdClient{dir: repo.Path, run: execBD}
+		if err := bd.reopen(a.Bead); err == nil {
+			_ = bd.note(a.Bead, fmt.Sprintf(
+				"Builder %s ended as %s having committed nothing; the spawner returned this bead to open so it is allocatable again (fw-lb8.7). See %s.",
+				a.Agent, b.Outcome, logPath))
+		}
+	}
 	return b
 }
 

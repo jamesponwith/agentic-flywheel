@@ -463,3 +463,36 @@ func TestCapsNormalizeMigratesInCode(t *testing.T) {
 		t.Errorf("in-code migration failed: %+v", got)
 	}
 }
+
+func TestWhyNotAllocatableNamesTheReason(t *testing.T) {
+	// "blocked, gated, claimed, human-only, an epic, or over the weight budget"
+	// tells the reader nothing they can act on. One bead, one reason (fw-lb8.7).
+	base := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		bead Bead
+		want string
+	}{
+		{"closed", Bead{ID: "x", Status: "closed"}, "already closed"},
+		{"epic", Bead{ID: "x", Status: "open", Type: "epic"}, "an epic"},
+		{"decision", Bead{ID: "x", Status: "open", Type: "decision"}, "a decision"},
+		{"human-only", Bead{ID: "x", Status: "open", Type: "task", Labels: []string{"human-only"}}, "human-only"},
+		{"leased", Bead{ID: "x", Status: "in_progress", Metadata: map[string]string{
+			leaseHolderKey: "a/b", leaseExpiresKey: base.Add(time.Hour).Format(time.RFC3339)}}, "claimed by a/b"},
+		{"in progress, no lease", Bead{ID: "x", Status: "in_progress"}, "no lease"},
+		{"too heavy", Bead{ID: "x", Status: "open", Type: "task", Labels: []string{"w:3"}}, "exceeds"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFake(tt.bead)
+			r := Roster{Caps: Caps{ReviewWeightPerNight: 2}, Repos: []Repo{{Name: "r", Path: "/r"}}}
+			_ = f
+			got := whyNotAllocatableWith(r, "x", func(string) bdClient {
+				return bdClient{dir: "/r", run: f.run}
+			})
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("reason = %q, want it to mention %q", got, tt.want)
+			}
+		})
+	}
+}
