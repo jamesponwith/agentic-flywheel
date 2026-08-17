@@ -69,3 +69,35 @@ func TestCommittedRosterHasNoHostPaths(t *testing.T) {
 		t.Errorf("committed roster contains an absolute host path:\n%s", b)
 	}
 }
+
+func TestLoadRosterCanonicalisesSymlinkedPaths(t *testing.T) {
+	// blackbird keys reservations by project_key. Two agents that resolve the
+	// same repo differently — one through a symlink, one not — get different
+	// keys and therefore never conflict, which is the failure reservations
+	// exist to prevent, in its most dangerous form: silent (fw-wb2.9).
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real-repo")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "via-symlink")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	p := filepath.Join(dir, "roster.json")
+	if err := os.WriteFile(p, []byte(`{
+      "caps": {"review_weight_per_night":8,"concurrent_builders":1,"repos_per_night":1},
+      "repos": [{"name":"a","path":"`+link+`"}], "agents": []}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRoster(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReal, _ := filepath.EvalSymlinks(real)
+	if r.Repos[0].Path != wantReal {
+		t.Errorf("path = %q, want the resolved %q — a symlinked roster entry\n"+
+			"would give builders a different project_key than the coordinator",
+			r.Repos[0].Path, wantReal)
+	}
+}

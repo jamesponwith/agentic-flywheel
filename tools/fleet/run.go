@@ -195,7 +195,10 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 			clean = append(clean, kv)
 		}
 	}
-	cmd.Env = append(clean, "FLYWHEEL_AGENT="+a.Agent)
+	// Hand the builder the canonical project_key rather than letting it derive
+	// one. A builder resolving its own path can disagree with the coordinator
+	// under a symlink, and two agents on different keys never conflict.
+	cmd.Env = append(clean, "FLYWHEEL_AGENT="+a.Agent, "FLYWHEEL_PROJECT_KEY="+repo.Path)
 
 	runErr := cmd.Run()
 	b.Took = time.Since(b.Started)
