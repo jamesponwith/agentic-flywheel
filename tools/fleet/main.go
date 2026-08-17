@@ -494,9 +494,19 @@ func doCost(rosterPath, since string, asJSON bool) error {
 		all = append(all, sp)
 	}
 	if asJSON {
+		// One object per repo, shaped for docs/fleet.html. Budget travels with
+		// the spend so the page can say "over" without a second source.
+		type row struct {
+			Spend
+			BudgetUSDMonth int `json:"budget_usd_month"`
+		}
+		out := make([]row, 0, len(all))
+		for i, sp := range all {
+			out = append(out, row{Spend: sp, BudgetUSDMonth: r.Repos[i].BudgetUSDMonth})
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(all)
+		return enc.Encode(out)
 	}
 	fmt.Printf("fleet spend since %s\n\n", from.Format("2006-01-02"))
 	measured := 0
