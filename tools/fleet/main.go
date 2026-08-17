@@ -11,6 +11,7 @@
 //	fleet bypasses                              gates that got skipped, and by how much
 //	fleet adr-drift                             decisions this branch made without recording
 //	fleet doctor                                which stages each repo is missing
+//	fleet cost                                  what the fleet spent, per repo
 //	fleet run                                   allocate, then spawn builders (needs -execute)
 package main
 
@@ -84,6 +85,8 @@ func main() {
 		err = doBypasses(*rosterPath, *since, *asJSON)
 	case "adr-drift":
 		err = doADRDrift(*dir, *base, *asJSON)
+	case "cost":
+		err = doCost(*rosterPath, *since, *asJSON)
 	case "doctor":
 		err = doDoctor(*rosterPath, *source, *fix, *asJSON, *self)
 	case "run":
@@ -470,6 +473,57 @@ func whyNotAllocatableWith(r Roster, id string, open openClient) string {
 	return "no roster repo has a bead with that id"
 }
 
+func doCost(rosterPath, since string, asJSON bool) error {
+	r, err := LoadRoster(rosterPath)
+	if err != nil {
+		return err
+	}
+	from := time.Now().AddDate(0, -1, 0)
+	if since != "" {
+		if d, err := time.ParseDuration(since); err == nil {
+			from = time.Now().Add(-d)
+		}
+	}
+	var all []Spend
+	for _, repo := range r.Repos {
+		sp, err := ReadSpend(repo, from)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", repo.Name, err)
+			continue
+		}
+		all = append(all, sp)
+	}
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(all)
+	}
+	fmt.Printf("fleet spend since %s\n\n", from.Format("2006-01-02"))
+	measured := 0
+	for _, sp := range all {
+		fmt.Println(sp)
+		if sp.Measured {
+			measured++
+		}
+	}
+	if measured == 0 {
+		// Say it plainly rather than printing zeros that read as "free".
+		fmt.Println("\nNo repo recorded a cost. The runner does not yet report usd/tokens" +
+			" into the audit log, so this is unmeasured rather than zero (fw-e7e.2).")
+	}
+	over, err := OverBudgetRepos(r, from)
+	if err != nil {
+		return err
+	}
+	if len(over) > 0 {
+		fmt.Printf("\nOVER BUDGET — these repos pause until the next window (ADR 0001):\n")
+		for _, sp := range over {
+			fmt.Println(sp)
+		}
+	}
+	return nil
+}
+
 func defaultRoster() string {
 	if p := os.Getenv("FLEET_ROSTER"); p != "" {
 		return p
@@ -496,6 +550,7 @@ func usage() {
   fleet bypasses [-roster PATH] [-since 30.days] [-json]
   fleet adr-drift [-dir .] [-base origin/main] [-json]
   fleet doctor [-roster PATH | -self] [-fix -source PATH] [-json]
+  fleet cost [-roster PATH] [-since 30.days] [-json]
   fleet run [-roster PATH] [-execute] [-bead ID] [-per-builder 25m] [-json]
 `)
 }
