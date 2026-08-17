@@ -12,6 +12,12 @@
 set -euo pipefail
 
 FLYWHEEL_HOME="${FLYWHEEL_HOME:-$HOME/.flywheel}"
+# Agent identity, in precedence order: the environment, then a file the
+# spawner writes into the worktree. The file exists because an allowlist entry
+# like Bash(tools/flywheel/guard.sh:*) does not match an env-prefixed
+# invocation, so a permitted agent could not set FLYWHEEL_AGENT on the call and
+# every audit entry it wrote said "unknown" — honest but degraded, and exactly
+# the attribution weakness fw-7mw was about.
 REPO_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 REPO_STATE="$REPO_DIR/.flywheel"
 LOG="$REPO_STATE/agent-log.jsonl"
@@ -33,6 +39,13 @@ USAGE
 
 stop_file_repo="$REPO_STATE/STOP"
 stop_file_fleet="$FLYWHEEL_HOME/STOP"
+
+# agent_name resolves who is acting, without needing an env-prefixed call.
+agent_name() {
+  if [ -n "${FLYWHEEL_AGENT:-}" ]; then printf '%s' "$FLYWHEEL_AGENT"; return; fi
+  if [ -r "$REPO_DIR/.flywheel/agent" ]; then head -1 "$REPO_DIR/.flywheel/agent"; return; fi
+  printf 'unknown'
+}
 
 cmd_check() {
   if [ -f "$stop_file_fleet" ]; then
@@ -118,7 +131,7 @@ cmd_log() {
   mkdir -p "$REPO_STATE"
   printf '{"ts":"%s","event":"%s","agent":"%s","repo":"%s"%s}\n' \
     "$(date -u +%FT%TZ)" "$(json_escape "$event")" \
-    "$(json_escape "${FLYWHEEL_AGENT:-unknown}")" "$(json_escape "$(basename "$REPO_DIR")")" \
+    "$(json_escape "$(agent_name)")" "$(json_escape "$(basename "$REPO_DIR")")" \
     "$fields" >> "$LOG"
 }
 

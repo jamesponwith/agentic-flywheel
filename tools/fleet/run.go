@@ -122,6 +122,12 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		_ = git2(repo.Path, "worktree", "remove", "--force", wt)
 	}()
 
+	// Write the builder's identity where guard.sh can read it without an
+	// env-prefixed invocation the allowlist cannot match.
+	if err := os.MkdirAll(filepath.Join(wt, ".flywheel"), 0o755); err == nil {
+		_ = os.WriteFile(filepath.Join(wt, ".flywheel", "agent"), []byte(a.Agent+"\n"), 0o644)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), opts.PerBuilder)
 	defer cancel()
 
@@ -155,7 +161,19 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	cmd.Dir = wt
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.Env = append(os.Environ(), "FLYWHEEL_AGENT="+a.Agent)
+	// Scrub any inherited FLYWHEEL_AGENT before setting this builder's own.
+	// The last run reported its audit entries under a name inherited from the
+	// parent shell rather than its assigned one — attribution in the ADR 0003
+	// log has to come from the assignment, not from whatever the environment
+	// happened to carry.
+	env := os.Environ()
+	clean := env[:0]
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "FLYWHEEL_AGENT=") {
+			clean = append(clean, kv)
+		}
+	}
+	cmd.Env = append(clean, "FLYWHEEL_AGENT="+a.Agent)
 
 	runErr := cmd.Run()
 	b.Took = time.Since(b.Started)

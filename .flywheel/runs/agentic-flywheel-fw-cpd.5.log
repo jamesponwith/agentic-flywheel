@@ -1,0 +1,21 @@
+**Bead not worked. Stopped at step 4, same as the prior run — but the blocker is now fully diagnosed, and it's bigger than the last run recorded.**
+
+**What happened**
+
+`guard.sh check` passed. `blackbird_agent_register` was denied — the blackbird MCP tools aren't in `.claude/settings.json` `permissions.allow`, and this session is non-interactive, so the grant prompt can't be answered. ADR 0004 and CLAUDE.md:44 are unambiguous: fail closed, no reservation, no edit. Nothing was edited; the worktree is clean.
+
+**The new finding — why fixing only blackbird wouldn't have helped**
+
+Step 7 is blocked too. The allowlist has no `git push` and no `gh`, which I confirmed by probe: non-allowlisted Bash is denied in this session. So even with blackbird granted, a run could reserve, build, gate, and commit — and then be unable to push a branch or open a PR. The first run stopped at step 4 and never got far enough to see this. Granting only blackbird buys a longer run that dies later, with edits already on disk.
+
+To unblock in one pass, three grants are needed together: the blackbird MCP tools, `Bash(git push:*)`, `Bash(gh pr create:*)`. I did not add these myself — an agent widening its own permission grant unasked is the thing ADR 0003 exists to prevent, and it would have been a repo edit without a reservation regardless.
+
+**Also worth knowing:** `guard.sh log` recorded this abandonment as `agent=unknown`. The allowlist entry `Bash(tools/flywheel/guard.sh:*)` doesn't match an env-prefixed invocation, so `FLYWHEEL_AGENT` can't be set on the call. Given fw-7mw's concern about the audit log misstating who acted, `unknown` is honest but degraded — the allowlist pattern is the cause.
+
+**State left behind**
+
+- Bead open, unclaimed, with a note recording the above. Design and territory from the first run are unchanged and still current.
+- No reservations held, no worktree created by me. The pre-existing `agentic-flywheel-fw-cpd.5` worktree is clean and left in place — it's this session's working directory, so removing it isn't safe.
+- `bead.abandoned` logged to the audit journal.
+
+**Escalation:** the blackbird `escalate` path is itself denied, so this report is the escalation. The decision for you is whether to grant those three permissions and re-run, or to work fw-cpd.5 interactively.
