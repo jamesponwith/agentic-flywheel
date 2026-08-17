@@ -56,6 +56,7 @@ var Manifest = []Artifact{
 	{".github/workflows/operate.yml", "operate", false, "", "probes the deployment and files incidents", false, true},
 
 	{".github/workflows/learn.yml", "learn", true, "", "weekly DORA + agent snapshot; the trend line", false, false},
+	{".github/workflows/signals.yml", "intent", false, "", "external signals become beads instead of being ignored", false, false},
 	{"docs/dora.html", "learn", false, "", "renders the snapshot", false, false},
 
 	{"tools/flywheel/guard.sh", "agents", true, "", "kill switch, audit log, review ledger", false, false},
