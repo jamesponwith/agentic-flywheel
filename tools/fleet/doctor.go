@@ -62,6 +62,7 @@ var Manifest = []Artifact{
 	{".github/workflows/drift.yml", "distribution", false, "", "notices when this repo falls behind the flywheel", false, false},
 
 	{"tools/flywheel/guard.sh", "agents", true, "", "kill switch, audit log, review ledger", false, false},
+	{"tools/flywheel/flaky.sh", "validate", false, "", "tells a flaky test from a broken one, and puts a deadline on it", false, false},
 	{".claude/skills/flywheel-next", "agents", false, "", "the unit of autonomous work", false, false},
 	{".claude/skills/flywheel-review", "agents", false, "", "three-lens review panel", false, false},
 	{".flywheel/README.md", "agents", false, "", "explains the local agent state directory", false, false},
