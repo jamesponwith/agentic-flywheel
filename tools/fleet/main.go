@@ -309,6 +309,11 @@ func doDoctor(rosterPath, source string, fix, asJSON bool) error {
 			for _, p := range installed {
 				fmt.Printf("    + installed %s\n", p)
 			}
+			for _, m := range d.Missing {
+				if m.Manual {
+					fmt.Printf("    ! %s needs hand adaptation — not installed (fw-fsa.7)\n", m.Path)
+				}
+			}
 			if len(installed) == 0 {
 				fmt.Println("    (nothing installable from the source)")
 			}

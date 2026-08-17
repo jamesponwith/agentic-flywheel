@@ -152,3 +152,73 @@ func TestInstallCopiesDirectoriesRecursively(t *testing.T) {
 		t.Errorf("skill directory not copied: %v", err)
 	}
 }
+
+func TestDiagnoseRespectsRepoRole(t *testing.T) {
+	// A template with a .beads database would seed every clone with someone
+	// else's issues, so it is not "missing" one (fw-fsa.6).
+	tpl := repoWith(t)
+	tpl.Role = "template"
+	if missingPaths(Diagnose(tpl))[".beads"] {
+		t.Error("reported .beads missing from a template")
+	}
+	inst := repoWith(t)
+	if !missingPaths(Diagnose(inst))[".beads"] {
+		t.Error("did not report .beads missing from an instance")
+	}
+}
+
+func TestDiagnoseRespectsSkippedStages(t *testing.T) {
+	// A training project with nothing deployed is not BEHIND on Operate; it has
+	// no use for it. A checklist reporting a permanent false gap gets ignored.
+	r := repoWith(t)
+	r.SkipStages = []string{"operate"}
+	m := missingPaths(Diagnose(r))
+	if m["docs/slo.yml"] || m[".github/workflows/operate.yml"] {
+		t.Error("reported Operate artifacts as gaps in a repo that skips the stage")
+	}
+	if !missingPaths(Diagnose(repoWith(t)))["docs/slo.yml"] {
+		t.Error("a repo that did NOT skip operate should still report it")
+	}
+}
+
+func TestInstallRefusesArtifactsNeedingAdaptation(t *testing.T) {
+	// -fix once installed the Go template's operate.yml into the router, where
+	// it referenced a ./tools/watch that does not exist. An artifact installed
+	// in a form that cannot work is worse than a reported gap, because the
+	// checklist then claims "complete".
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, ".github/workflows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, ".github/workflows/operate.yml"), []byte("go run ./tools/watch"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "SPEC.md"), []byte("spec"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := repoWith(t)
+	installed, err := Install(repo, src, []Finding{
+		{Path: ".github/workflows/operate.yml", Manual: true},
+		{Path: "SPEC.md"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range installed {
+		if p == ".github/workflows/operate.yml" {
+			t.Error("installed an artifact that needs hand adaptation")
+		}
+	}
+	if len(installed) != 1 || installed[0] != "SPEC.md" {
+		t.Errorf("installed = %v, want only SPEC.md", installed)
+	}
+}
+
+func TestManifestMarksTheArtifactsThatBitUs(t *testing.T) {
+	want := map[string]bool{".github/workflows/operate.yml": true, "docs/slo.yml": true}
+	for _, a := range Manifest {
+		if want[a.Path] && !a.NeedsAdaptation {
+			t.Errorf("%s is copyable per the manifest, but it is not portable between languages", a.Path)
+		}
+	}
+}

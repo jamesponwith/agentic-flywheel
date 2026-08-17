@@ -25,33 +25,43 @@ type Artifact struct {
 	Required bool   // false = expected only once the stage is adopted
 	Lang     string // "" = all languages, else "go" / "python"
 	Why      string // shown when it is missing; a checklist nobody understands gets ignored
+	// InstanceOnly artifacts are not expected in a template. A template with a
+	// .beads database would seed every clone with someone else's issues.
+	InstanceOnly bool
+	// NeedsAdaptation marks artifacts that cannot be copied verbatim between
+	// repos. operate.yml in the Go template runs `go run ./tools/watch`, a path
+	// only the template has; -fix once installed exactly that into the router
+	// and produced a workflow that fails on first run. An artifact installed in
+	// a form that cannot work is worse than a reported gap, because the
+	// checklist then says "complete" (fw-fsa.7).
+	NeedsAdaptation bool
 }
 
 // Manifest is what "inside the flywheel" means, as data.
 var Manifest = []Artifact{
-	{"SPEC.md", "intent", true, "", "no spec means the agent has no intent to read"},
-	{"CLAUDE.md", "intent", true, "", "conventions the agent loads before writing code"},
-	{"docs/adr", "intent", true, "", "decisions that would cost >5 minutes to re-derive"},
-	{".beads", "intent", true, "", "no bead, no build"},
+	{"SPEC.md", "intent", true, "", "no spec means the agent has no intent to read", false, false},
+	{"CLAUDE.md", "intent", true, "", "conventions the agent loads before writing code", false, false},
+	{"docs/adr", "intent", true, "", "decisions that would cost >5 minutes to re-derive", false, false},
+	{".beads", "intent", true, "", "no bead, no build", true, false},
 
-	{"lefthook.yml", "build", true, "", "the inner-loop gate; without it nothing is checked before commit"},
+	{"lefthook.yml", "build", true, "", "the inner-loop gate; without it nothing is checked before commit", false, false},
 
-	{".github/workflows/pr.yml", "validate", true, "", "no green, no merge"},
-	{".gitattributes", "validate", false, "", "union merge on agent logs so parallel agents do not conflict"},
+	{".github/workflows/pr.yml", "validate", true, "", "no green, no merge", false, false},
+	{".gitattributes", "validate", false, "", "union merge on agent logs so parallel agents do not conflict", false, false},
 
-	{".github/workflows/release.yml", "release", false, "", "semver tag to signed binaries"},
-	{".goreleaser.yaml", "release", false, "go", "release build config"},
+	{".github/workflows/release.yml", "release", false, "", "semver tag to signed binaries", false, false},
+	{".goreleaser.yaml", "release", false, "go", "release build config", false, false},
 
-	{"docs/slo.yml", "operate", false, "", "the Operate contract: what counts as a breach"},
-	{".github/workflows/operate.yml", "operate", false, "", "probes the deployment and files incidents"},
+	{"docs/slo.yml", "operate", false, "", "the Operate contract: what counts as a breach", false, true},
+	{".github/workflows/operate.yml", "operate", false, "", "probes the deployment and files incidents", false, true},
 
-	{".github/workflows/learn.yml", "learn", true, "", "weekly DORA + agent snapshot; the trend line"},
-	{"docs/dora.html", "learn", false, "", "renders the snapshot"},
+	{".github/workflows/learn.yml", "learn", true, "", "weekly DORA + agent snapshot; the trend line", false, false},
+	{"docs/dora.html", "learn", false, "", "renders the snapshot", false, false},
 
-	{"tools/flywheel/guard.sh", "agents", true, "", "kill switch, audit log, review ledger"},
-	{".claude/skills/flywheel-next", "agents", false, "", "the unit of autonomous work"},
-	{".claude/skills/flywheel-review", "agents", false, "", "three-lens review panel"},
-	{".flywheel/README.md", "agents", false, "", "explains the local agent state directory"},
+	{"tools/flywheel/guard.sh", "agents", true, "", "kill switch, audit log, review ledger", false, false},
+	{".claude/skills/flywheel-next", "agents", false, "", "the unit of autonomous work", false, false},
+	{".claude/skills/flywheel-review", "agents", false, "", "three-lens review panel", false, false},
+	{".flywheel/README.md", "agents", false, "", "explains the local agent state directory", false, false},
 }
 
 type Diagnosis struct {
@@ -65,6 +75,8 @@ type Finding struct {
 	Stage    string `json:"stage"`
 	Required bool   `json:"required"`
 	Why      string `json:"why"`
+	// Manual artifacts must be adapted by hand; -fix refuses to install them.
+	Manual bool `json:"manual,omitempty"`
 }
 
 // Diagnose reports what a repo is missing. It never modifies anything.
@@ -74,11 +86,17 @@ func Diagnose(repo Repo) Diagnosis {
 		if a.Lang != "" && repo.Lang != "" && a.Lang != repo.Lang {
 			continue // a Go release config is not missing from a Python repo
 		}
+		if a.InstanceOnly && repo.Role == "template" {
+			continue // a template with a beads DB seeds every clone with its issues
+		}
+		if repo.skips(a.Stage) {
+			continue // this repo has declared it has no use for the stage
+		}
 		if _, err := os.Stat(filepath.Join(repo.Path, a.Path)); err == nil {
 			d.Present++
 			continue
 		}
-		d.Missing = append(d.Missing, Finding{a.Path, a.Stage, a.Required, a.Why})
+		d.Missing = append(d.Missing, Finding{a.Path, a.Stage, a.Required, a.Why, a.NeedsAdaptation})
 	}
 	sort.SliceStable(d.Missing, func(i, j int) bool {
 		if d.Missing[i].Required != d.Missing[j].Required {
@@ -94,6 +112,11 @@ func Diagnose(repo Repo) Diagnosis {
 func Install(repo Repo, source string, only []Finding) ([]string, error) {
 	var done []string
 	for _, f := range only {
+		if f.Manual {
+			// Refuse rather than install something that cannot work here. A
+			// wrongly-installed artifact makes the checklist say "complete".
+			continue
+		}
 		src := filepath.Join(source, f.Path)
 		if _, err := os.Stat(src); err != nil {
 			continue // the source does not have it either; not this tool's problem
@@ -145,6 +168,19 @@ func copyPath(src, dst string) error {
 	defer out.Close()
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// skips reports whether the repo declared no use for a stage. "Not applicable"
+// is a third state alongside present and missing: a training project with
+// nothing deployed is not BEHIND on Operate, it simply has no use for it, and a
+// checklist that reports a permanent false gap trains people to ignore it.
+func (r Repo) skips(stage string) bool {
+	for _, s := range r.SkipStages {
+		if s == stage {
+			return true
+		}
+	}
+	return false
 }
 
 func (d Diagnosis) String() string {
