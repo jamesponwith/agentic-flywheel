@@ -31,6 +31,17 @@ footer{color:#30363d;margin-top:2rem}
   <th>repo</th><th>first-pass gate</th><th>rework</th><th>round-trips</th><th>autonomous PRs</th><th>merged untouched</th>
 </tr></thead><tbody></tbody></table>
 
+<h2 style="color:#7ee787;font-size:14px">the fleet</h2>
+<p class="note">
+  What unattended agents did, and what it cost. Sourced from each repo's
+  committed <code>docs/fleet.json</code>, written by <code>fleet cost -json</code>.
+  A repo whose cost was never recorded shows <b>unmeasured</b> — not zero.
+  Zero and unmeasured mean opposite things.
+</p>
+<table id="fleet"><thead><tr>
+  <th>repo</th><th>builders</th><th>green</th><th>spend</th><th>per green PR</th><th>budget</th>
+</tr></thead><tbody></tbody></table>
+
 <footer>weekly snapshots by learn.yml · <span id="count"></span></footer>
 <script>
 // Each repo publishes its own snapshot; this page is only a join over them.
@@ -62,6 +73,24 @@ REPOS.forEach(function(repo){
         cell(mt.samples ? num(mt.median, "h") : "n/a", "n") +
         cell((d.generated_at || "").slice(0, 10), "dim") + "</tr>";
       document.querySelector("#dora tbody").insertAdjacentHTML("beforeend", row);
+
+      // Fleet spend is optional in exactly the same way, and for the same
+      // reason: a repo that has never run a builder has nothing to say.
+      var fl = d.fleet;
+      if (fl) {
+        var spend = fl.measured ? "$" + fl.usd.toFixed(2) : "<em>unmeasured</em>";
+        var per = fl.measured && fl.green
+          ? "$" + (fl.usd / fl.green).toFixed(2)
+          : "<em>n/a</em>";
+        var budget = fl.budget_usd_month
+          ? (fl.measured && fl.usd > fl.budget_usd_month
+              ? "<b style='color:#f0883e'>over $" + fl.budget_usd_month + "</b>"
+              : "$" + fl.budget_usd_month)
+          : "—";
+        document.querySelector("#fleet tbody").insertAdjacentHTML("beforeend",
+          "<tr>" + cell(name) + cell(fl.builders, "n") + cell(fl.green, "n") +
+          cell(spend, "n") + cell(per, "n") + cell(budget, "n") + "</tr>");
+      }
 
       // Agent metrics are optional — a repo whose snapshot predates Learn v2
       // simply does not appear in the second table rather than breaking it.
