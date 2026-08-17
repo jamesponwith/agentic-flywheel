@@ -12,16 +12,43 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
+
+// leakedEnv are the variables that would make a subprocess act on a repository
+// or as an identity the test did not choose. git exports the GIT_* ones to its
+// own hooks, and lefthook runs `go test` from the pre-commit hook — so without
+// this, "scratch" is the real repo and "unset agent" is whoever is committing
+// (fw-u6g).
+var leakedEnv = []string{
+	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX", "GIT_COMMON_DIR",
+	"GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
+	"FLYWHEEL_AGENT", "FLYWHEEL_HOME",
+}
+
+func hermeticEnv() []string {
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(leakedEnv, k) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
 
 // scratch returns an empty git repo for guard.sh to treat as its own, so a
 // test never appends to the real .flywheel/agent-log.jsonl.
 func scratch(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+	c := exec.Command("git", "-C", dir, "init", "-q")
+	c.Env = hermeticEnv()
+	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	return dir
@@ -41,7 +68,7 @@ func runGuard(t *testing.T, dir, agent string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(guardPath(t), args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "FLYWHEEL_HOME="+filepath.Join(dir, "home"))
+	cmd.Env = append(hermeticEnv(), "FLYWHEEL_HOME="+filepath.Join(dir, "home"))
 	if agent != "" {
 		cmd.Env = append(cmd.Env, "FLYWHEEL_AGENT="+agent)
 	}

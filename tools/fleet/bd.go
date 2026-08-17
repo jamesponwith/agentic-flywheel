@@ -50,8 +50,7 @@ func (b Bead) HasLabel(l string) bool {
 type runner func(dir string, args ...string) ([]byte, error)
 
 func execBD(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("bd", args...)
-	cmd.Dir = dir
+	cmd := inDir(dir, "bd", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError

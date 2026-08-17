@@ -59,6 +59,12 @@ func Allocate(r Roster, open openClient, now time.Time) (Plan, error) {
 	return AllocateWithLoad(r, open, nil, now)
 }
 
+// OnlyBead narrows allocation to a single named bead, for a supervised run.
+// It filters CANDIDATES, not results: filtering afterwards cannot reach a bead
+// the concurrency cap already excluded, which is what makes "run exactly this
+// one" useless precisely when the queue is busy.
+var OnlyBead string
+
 // AllocateWithLoad is Allocate with review pressure accounted for.
 func AllocateWithLoad(r Roster, open openClient, load reviewLoad, now time.Time) (Plan, error) {
 	r.Caps = r.Caps.normalized()
@@ -116,6 +122,15 @@ func AllocateWithLoad(r Roster, open openClient, load reviewLoad, now time.Time)
 			continue
 		}
 		beads = allocatable(beads, now)
+		if OnlyBead != "" {
+			var only []Bead
+			for _, b := range beads {
+				if b.ID == OnlyBead {
+					only = append(only, b)
+				}
+			}
+			beads = only
+		}
 		// Sort by priority, then id. The id tiebreak is not cosmetic: without
 		// it, equal-priority beads come back in whatever order bd emitted them,
 		// so two runs of the same queue produce different plans. A plan you

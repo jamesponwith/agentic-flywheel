@@ -2,3 +2,6 @@
 # The roster moved to .flywheel/ so the collision with a config directory is
 # gone (fw-oef.10); the stray binary is still worth ignoring.
 /fleet
+
+# stray blackbird daemon artifact, not ours
+blackbird.db
