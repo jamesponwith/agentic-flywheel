@@ -29,23 +29,30 @@ type Builder struct {
 	Worktree string        `json:"worktree"`
 	Started  time.Time     `json:"started"`
 	Took     time.Duration `json:"took"`
-	Outcome  string        `json:"outcome"` // green | abandoned | timeout | error | skipped
+	Outcome  string        `json:"outcome"` // green | no-op | abandoned | timeout | error | skipped
+	Commits  int           `json:"commits"` // evidence: green requires > 0
 	Detail   string        `json:"detail"`
 }
 
 // RunOpts bounds a night. Every field here exists because something without it
 // would be unbounded.
 type RunOpts struct {
-	Execute     bool          // false = plan only; the default is not to act
-	PerBuilder  time.Duration // wall-clock cap per builder
-	MaxTurns    int           // agent turn cap, so a confused builder stops
+	Execute    bool          // false = plan only; the default is not to act
+	PerBuilder time.Duration // wall-clock cap per builder
+	// MaxTurns stops a confused builder circling. It is NOT the real bound —
+	// wall-clock is. Run 6 hit 60 turns after 14 minutes of genuine work and
+	// lost all of it, because reserve, design, write, test, gate, commit, push
+	// and PR do not fit in 60 turns. Set it high enough that only a loop trips
+	// it, and let PerBuilder be what actually bounds a run.
+	MaxTurns int
+
 	Concurrency int
 	LogDir      string
 	Runner      Runner // how to invoke an agent (ADR 0010)
 }
 
 func DefaultRunOpts() RunOpts {
-	return RunOpts{PerBuilder: 25 * time.Minute, MaxTurns: 60, Concurrency: 3, LogDir: ".flywheel/runs"}
+	return RunOpts{PerBuilder: 35 * time.Minute, MaxTurns: 300, Concurrency: 3, LogDir: ".flywheel/runs"}
 }
 
 // Run executes a plan. It re-checks the kill switch before every builder, not
@@ -104,6 +111,12 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	wt := filepath.Join(filepath.Dir(repo.Path), fmt.Sprintf("%s-%s", repo.Name, a.Bead))
 	b.Worktree = wt
 
+	// Record the exact commit the worktree starts from. Counting against main
+	// would credit the builder with whatever its base branch already carried —
+	// the first attempt at this check would have called a no-op green because
+	// the worktree was cut from a feature branch, not from main.
+	base := headOf(repo.Path)
+
 	// Worktree first: if this fails, nothing has been claimed or edited.
 	if err := git2(repo.Path, "worktree", "add", "-b", "bead/"+a.Bead, wt); err != nil {
 		b.Outcome, b.Detail = "error", "worktree: "+err.Error()
@@ -114,6 +127,12 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		// Always detach the worktree. The branch survives — that is the work.
 		_ = git2(repo.Path, "worktree", "remove", "--force", wt)
 	}()
+
+	// Write the builder's identity where guard.sh can read it without an
+	// env-prefixed invocation the allowlist cannot match.
+	if err := os.MkdirAll(filepath.Join(wt, ".flywheel"), 0o755); err == nil {
+		_ = os.WriteFile(filepath.Join(wt, ".flywheel", "agent"), []byte(a.Agent+"\n"), 0o644)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), opts.PerBuilder)
 	defer cancel()
@@ -148,10 +167,31 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	cmd.Dir = wt
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.Env = append(os.Environ(), "FLYWHEEL_AGENT="+a.Agent)
+	// Scrub any inherited FLYWHEEL_AGENT before setting this builder's own.
+	// The last run reported its audit entries under a name inherited from the
+	// parent shell rather than its assigned one — attribution in the ADR 0003
+	// log has to come from the assignment, not from whatever the environment
+	// happened to carry.
+	// hermeticEnv, not os.Environ: a builder that inherited GIT_DIR would edit
+	// the spawner's repository from inside its own worktree.
+	env := hermeticEnv()
+	clean := env[:0]
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "FLYWHEEL_AGENT=") {
+			clean = append(clean, kv)
+		}
+	}
+	cmd.Env = append(clean, "FLYWHEEL_AGENT="+a.Agent)
 
 	runErr := cmd.Run()
 	b.Took = time.Since(b.Started)
+
+	// Exit 0 is NOT success. The first live run blocked on permissions, did
+	// nothing, explained itself clearly, and exited 0 — and was reported as
+	// green. A builder that produced no commits produced no work, whatever its
+	// exit code says, and calling that green is the same class of lie as an
+	// empty review ledger reading as "no findings".
+	commits := commitsSince(repo.Path, base, "bead/"+a.Bead)
 
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
@@ -160,17 +200,44 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	case runErr != nil:
 		b.Outcome = "abandoned"
 		b.Detail = fmt.Sprintf("%v — see %s", runErr, logPath)
+	case commits == 0:
+		b.Outcome = "no-op"
+		b.Detail = fmt.Sprintf("agent exited cleanly but committed nothing — read %s before trusting this", logPath)
 	default:
 		b.Outcome = "green"
-		b.Detail = "see " + logPath
+		b.Detail = fmt.Sprintf("%d commit(s), see %s", commits, logPath)
 	}
+	b.Commits = commits
 	return b
 }
 
+// headOf returns the commit a worktree will be cut from.
+func headOf(dir string) string {
+	out, err := inDir(dir, "git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// commitsSince counts what the builder itself added — commits between the base
+// the worktree was cut from and the branch head. This is the only evidence a
+// builder did work, and it must not credit whatever the base already carried.
+func commitsSince(dir, base, branch string) int {
+	if base == "" {
+		return 0
+	}
+	out, err := inDir(dir, "git", "rev-list", "--count", base+".."+branch).Output()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &n)
+	return n
+}
+
 func git2(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := inDir(dir, "git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -183,8 +250,8 @@ func Digest(bs []Builder) string {
 	for _, b := range bs {
 		counts[b.Outcome]++
 	}
-	fmt.Fprintf(&sb, "%d builder(s): %d green, %d abandoned, %d timeout, %d error, %d skipped\n",
-		len(bs), counts["green"], counts["abandoned"], counts["timeout"], counts["error"], counts["skipped"])
+	fmt.Fprintf(&sb, "%d builder(s): %d green, %d no-op, %d abandoned, %d timeout, %d error, %d skipped\n",
+		len(bs), counts["green"], counts["no-op"], counts["abandoned"], counts["timeout"], counts["error"], counts["skipped"])
 	for _, b := range bs {
 		fmt.Fprintf(&sb, "  %-22s %-12s %-10s %-8s %s\n",
 			b.Repo, b.Bead, b.Outcome, b.Took.Round(time.Second), b.Detail)

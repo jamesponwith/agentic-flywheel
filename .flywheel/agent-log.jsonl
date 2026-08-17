@@ -18,3 +18,5 @@
 {"ts":"2026-08-17T01:14:27Z","event":"bead.pr_opened","agent":"unknown","repo":"agentic-flywheel","bead":"fw-ldz","pr":"19","agent":"fleet/builder-go"}
 {"ts":"2026-08-17T01:14:27Z","event":"review.skipped","agent":"unknown","repo":"agentic-flywheel","bead":"fw-ldz","reason":"docs-only-diff","detail":"no /flywheel-review run; ledger has no entry for PR 19"}
 {"ts":"2026-08-17T01:33:41Z","event":"bead.pr_opened","agent":"agentic-flywheel/builder","repo":"agentic-flywheel","bead":"fw-7mw","pr":"20"}
+{"ts":"2026-08-17T02:05:42Z","event":"probe.attribution","agent":"unknown","repo":"agentic-flywheel","bead":"test"}
+{"ts":"2026-08-17T02:05:49Z","event":"probe.attribution","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"test"}

@@ -16,7 +16,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -68,9 +67,7 @@ func liveHydrateOps() hydrateOps {
 
 // gitHead returns the current commit, or "" if this is not a git repo.
 func gitHead(path string) string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = path
-	out, err := cmd.Output()
+	out, err := inDir(path, "git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		return ""
 	}
@@ -79,9 +76,7 @@ func gitHead(path string) string {
 
 // gitDirtyBeads lists tracked files modified under .beads/ in a repo.
 func gitDirtyBeads(path string) []string {
-	cmd := exec.Command("git", "status", "--porcelain", "--", ".beads")
-	cmd.Dir = path
-	out, err := cmd.Output()
+	out, err := inDir(path, "git", "status", "--porcelain", "--", ".beads").Output()
 	if err != nil {
 		return nil
 	}

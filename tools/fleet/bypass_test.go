@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -13,9 +12,7 @@ func gitRepo(t *testing.T) string {
 		{"init", "-q", "-b", "main"},
 		{"config", "user.email", "t@t"}, {"config", "user.name", "t"},
 	} {
-		c := exec.Command("git", args...)
-		c.Dir = dir
-		if out, err := c.CombinedOutput(); err != nil {
+		if out, err := gitCmd(dir, args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
@@ -24,18 +21,14 @@ func gitRepo(t *testing.T) string {
 
 func commit(t *testing.T, dir, msg string) {
 	t.Helper()
-	c := exec.Command("git", "commit", "-q", "--allow-empty", "-m", msg)
-	c.Dir = dir
-	if out, err := c.CombinedOutput(); err != nil {
+	if out, err := gitCmd(dir, "commit", "-q", "--allow-empty", "-m", msg).CombinedOutput(); err != nil {
 		t.Fatalf("commit: %v\n%s", err, out)
 	}
 }
 
 func run(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	c := exec.Command("git", args...)
-	c.Dir = dir
-	if out, err := c.CombinedOutput(); err != nil {
+	if out, err := gitCmd(dir, args...).CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
@@ -139,9 +132,8 @@ func TestSquashPattern(t *testing.T) {
 
 func commitAs(t *testing.T, dir, author, email, msg string) {
 	t.Helper()
-	c := exec.Command("git", "commit", "-q", "--allow-empty", "-m", msg,
+	c := gitCmd(dir, "commit", "-q", "--allow-empty", "-m", msg,
 		"--author", author+" <"+email+">")
-	c.Dir = dir
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("commit: %v\n%s", err, out)
 	}

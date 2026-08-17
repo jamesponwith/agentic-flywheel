@@ -11,6 +11,10 @@ fleet reclaim                               sweep expired leases back to ready
 fleet status                                who holds what, across the fleet
 fleet allocate                              tonight's plan (prints, never spawns)
 fleet hydrate                               make every repo's beads readable
+fleet bypasses                              gates that got skipped, and by how much
+fleet adr-drift                             decisions this branch made without recording
+fleet doctor                                which stages each repo is missing
+fleet run                                   allocate, then spawn builders (needs -execute)
 ```
 
 ## Why hydrate exists
@@ -40,6 +44,29 @@ because nothing was broken — it simply was not what the PR claimed to be.
 
 hydrate now records HEAD before and after. A commit it did not ask for is
 reported as `mutated`, with the exact range to inspect, and exits non-zero.
+
+## Why adr-drift is advisory and generous
+
+```
+fleet adr-drift [-dir .] [-base origin/main] [-json]
+```
+
+Three signals, all from git alone: a `require` line naming a module the base did
+not have, an exported top-level declaration that changed shape or disappeared,
+and a changed file sitting under a path an existing ADR names. Any of them
+*might* be a decision nobody wrote down.
+
+One suppression rule covers all three: a branch that touches `docs/adr/`, or
+says "ADR NNNN" in a commit message or an added line, is silent. That is
+deliberately blunt — it cannot tell whether the ADR is about the thing flagged.
+The check's own acceptance criterion is that it gets deleted if it is wrong more
+than half the time, so every ambiguity resolves toward saying nothing. A missed
+flag costs one un-recorded decision; a wrong one costs the whole check, because
+a noisy advisory warning is ignored within a week.
+
+Its path list maintains itself: a backticked token in an ADR counts only if it
+resolves to a real file or directory at HEAD, so paths that move, get deleted, or
+were never in this repo drop out on their own.
 
 ## Why leases
 

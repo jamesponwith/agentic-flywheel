@@ -9,6 +9,7 @@
 //	fleet allocate                              tonight's plan (prints, never spawns)
 //	fleet hydrate                               make every repo's beads readable
 //	fleet bypasses                              gates that got skipped, and by how much
+//	fleet adr-drift                             decisions this branch made without recording
 //	fleet doctor                                which stages each repo is missing
 //	fleet run                                   allocate, then spawn builders (needs -execute)
 package main
@@ -35,9 +36,11 @@ func main() {
 	rosterPath := fs.String("roster", defaultRoster(), "path to roster.json")
 	asJSON := fs.Bool("json", false, "JSON output")
 	since := fs.String("since", "", "only consider history since this git date (e.g. 30.days)")
+	base := fs.String("base", "origin/main", "base ref to compare this branch against (adr-drift)")
 	source := fs.String("source", "", "template repo to copy missing artifacts from (doctor -fix)")
 	fix := fs.Bool("fix", false, "install missing artifacts from -source; never overwrites")
 	self := fs.Bool("self", false, "diagnose the current repo instead of a roster")
+	onlyBead := fs.String("bead", "", "run exactly this bead, ignoring the queue (for a supervised run)")
 	execute := fs.Bool("execute", false, "actually spawn builders (default is a dry run)")
 	perBuilder := fs.Duration("per-builder", DefaultRunOpts().PerBuilder, "wall-clock cap per builder")
 
@@ -79,10 +82,12 @@ func main() {
 		err = doHydrate(*rosterPath, *asJSON)
 	case "bypasses":
 		err = doBypasses(*rosterPath, *since, *asJSON)
+	case "adr-drift":
+		err = doADRDrift(*dir, *base, *asJSON)
 	case "doctor":
 		err = doDoctor(*rosterPath, *source, *fix, *asJSON, *self)
 	case "run":
-		err = doRun(*rosterPath, *execute, *perBuilder, *asJSON)
+		err = doRun(*rosterPath, *execute, *perBuilder, *onlyBead, *asJSON)
 	default:
 		usage()
 		os.Exit(2)
@@ -288,6 +293,37 @@ func doBypasses(rosterPath, since string, asJSON bool) error {
 	return nil
 }
 
+// doADRDrift always succeeds. ADR 0001's standing rule is that a gate goes
+// blocking only once its noise level is known, and a check that failed the PR
+// on its own inability to run would be the first thing anyone bypassed.
+func doADRDrift(dir, base string, asJSON bool) error {
+	drifts, err := DetectDrift(dir, base)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: adr-drift: %v\n", err)
+		drifts = nil
+	}
+	if asJSON {
+		if drifts == nil {
+			drifts = []Drift{}
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(drifts)
+	}
+	if len(drifts) == 0 {
+		fmt.Println("adr-drift: nothing to flag")
+		return nil
+	}
+	// ::warning:: puts each flag in the PR checks UI, the same way bead-lint.sh
+	// does. It is a note next to the diff, never a failure.
+	for _, d := range drifts {
+		fmt.Printf("::warning::adr-drift %s: %s — %s\n", d.Kind, d.Path, d.Detail)
+	}
+	fmt.Fprintf(os.Stderr, "\n%d possible undocumented decision(s). If one of them is a decision, "+
+		"add an ADR (copy docs/adr/template.md); if not, ignore this — it never blocks.\n", len(drifts))
+	return nil
+}
+
 func doDoctor(rosterPath, source string, fix, asJSON, self bool) error {
 	var r Roster
 	if self {
@@ -341,11 +377,13 @@ func doDoctor(rosterPath, source string, fix, asJSON, self bool) error {
 	return nil
 }
 
-func doRun(rosterPath string, execute bool, perBuilder time.Duration, asJSON bool) error {
+func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead string, asJSON bool) error {
 	r, err := LoadRoster(rosterPath)
 	if err != nil {
 		return err
 	}
+	OnlyBead = onlyBead
+	defer func() { OnlyBead = "" }()
 	plan, err := AllocateWithLoad(r, func(p string) bdClient {
 		return bdClient{dir: p, run: execBD}
 	}, ghReviewLoad, time.Now())
@@ -355,6 +393,9 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, asJSON boo
 	if plan.Stopped != "" {
 		fmt.Printf("HALTED — kill switch set (%s)\n", plan.Stopped)
 		return nil
+	}
+	if onlyBead != "" && len(plan.Assignments) == 0 {
+		return fmt.Errorf("%s is not allocatable — blocked, gated, claimed, human-only, an epic, or over the weight budget", onlyBead)
 	}
 	if len(plan.Assignments) == 0 {
 		fmt.Println("nothing to do")
@@ -417,7 +458,8 @@ func usage() {
   fleet allocate [-roster PATH] [-json]
   fleet hydrate [-roster PATH] [-json]
   fleet bypasses [-roster PATH] [-since 30.days] [-json]
+  fleet adr-drift [-dir .] [-base origin/main] [-json]
   fleet doctor [-roster PATH | -self] [-fix -source PATH] [-json]
-  fleet run [-roster PATH] [-execute] [-per-builder 25m] [-json]
+  fleet run [-roster PATH] [-execute] [-bead ID] [-per-builder 25m] [-json]
 `)
 }
