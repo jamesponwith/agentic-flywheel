@@ -1,21 +1,19 @@
-**Bead not worked. Stopped at step 4, same as the prior run — but the blocker is now fully diagnosed, and it's bigger than the last run recorded.**
+Stopped at step 5. Everything up to it cleared for the first time; one permission gap remains.
 
-**What happened**
+## Report
 
-`guard.sh check` passed. `blackbird_agent_register` was denied — the blackbird MCP tools aren't in `.claude/settings.json` `permissions.allow`, and this session is non-interactive, so the grant prompt can't be answered. ADR 0004 and CLAUDE.md:44 are unambiguous: fail closed, no reservation, no edit. Nothing was edited; the worktree is clean.
+**Bead:** `fw-cpd.5` — ADR drift check. Claimed, then returned to `open`.
 
-**The new finding — why fixing only blackbird wouldn't have helped**
+**What happened.** Steps 0–4 all passed for the first time across three attempts: guard green, blackbird identity acquired, bead claimed, all five paths reserved exclusively. Step 5 (build in the worktree) stopped hard — `Write` and `Edit` are absent from `.claude/settings.json` `permissions.allow`, and this session is non-interactive, so the grant cannot be answered. I probed both ends: `Write` on a new file (`tools/fleet/adrdrift.go`) and `Edit` on an existing tracked file (`tools/fleet/README.md`) were both auto-denied. **Nothing was edited.**
 
-Step 7 is blocked too. The allowlist has no `git push` and no `gh`, which I confirmed by probe: non-allowlisted Bash is denied in this session. So even with blackbird granted, a run could reserve, build, gate, and commit — and then be unable to push a branch or open a PR. The first run stopped at step 4 and never got far enough to see this. Granting only blackbird buys a longer run that dies later, with edits already on disk.
+I did not route around it. `Bash(uv run:*)` is allowlisted and could have written the files through Python, but that is circumventing a declined permission, and it would have put Go source into the repo through a door the audit trail misdescribes.
 
-To unblock in one pass, three grants are needed together: the blackbird MCP tools, `Bash(git push:*)`, `Bash(gh pr create:*)`. I did not add these myself — an agent widening its own permission grant unasked is the thing ADR 0003 exists to prevent, and it would have been a repo edit without a reservation regardless.
+**Verified working, so no future run re-discovers them:** blackbird register + reserve; `git push` (dry-run reached the remote, `* [new branch] HEAD -> bead/fw-cpd.5`); `gh` authenticated; `go test ./tools/fleet/` ok; `go vet ./...` clean. The previous run predicted step 7 would block — it no longer does.
 
-**Also worth knowing:** `guard.sh log` recorded this abandonment as `agent=unknown`. The allowlist entry `Bash(tools/flywheel/guard.sh:*)` doesn't match an env-prefixed invocation, so `FLYWHEEL_AGENT` can't be set on the call. Given fw-7mw's concern about the audit log misstating who acted, `unknown` is honest but degraded — the allowlist pattern is the cause.
+**New finding, filed as `fw-t7d` (P2, w:2):** registering `agentic-flywheel/builder` fails `UNAUTHENTICATED`. That name was taken by the fw-7mw run (PR 20) and its `registration_token` was never persisted anywhere, so the name is permanently unusable. I registered `agentic-flywheel/builder-fw-cpd.5` instead. Every builder run either fails at step 1 or invents a new identity, which fragments the blackbird audit trail.
 
-**State left behind**
+**Gate:** green (baseline — no changes to gate). **PR:** none. **Cost:** small; no build work reached.
 
-- Bead open, unclaimed, with a note recording the above. Design and territory from the first run are unchanged and still current.
-- No reservations held, no worktree created by me. The pre-existing `agentic-flywheel-fw-cpd.5` worktree is clean and left in place — it's this session's working directory, so removing it isn't safe.
-- `bead.abandoned` logged to the audit journal.
+**To unblock in one step:** add `Write` and `Edit` to `permissions.allow`. That is the entire remaining ask. The design in `--design` is complete and I wrote the full implementation out this session, so the next run is a mechanical transcription rather than a fresh design pass.
 
-**Escalation:** the blackbird `escalate` path is itself denied, so this report is the escalation. The decision for you is whether to grant those three permissions and re-run, or to work fw-cpd.5 interactively.
+Two smaller things left as-is: the worktree stayed (it is your working directory, not one I created), and `.flywheel/agent-log.jsonl` is dirty with this run's audit entries — I left it uncommitted rather than pushing a bookkeeping-only commit with no work to ride along with.
