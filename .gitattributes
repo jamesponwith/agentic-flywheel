@@ -1,3 +1,7 @@
 # Append-only agent logs: parallel agents append, never rewrite. Union-merge
 # so two agents' nightly records combine instead of conflicting.
 .flywheel/agent-log.jsonl merge=union
+
+# The review ledger is appended by every reviewer, never rewritten. Same
+# reasoning as the agent log above: two reviews combine, they do not conflict.
+.flywheel/review.jsonl merge=union
