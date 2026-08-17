@@ -69,11 +69,19 @@ type Caps struct {
 }
 
 type Repo struct {
-	Name           string `json:"name"`
-	Path           string `json:"path"`
-	Lang           string `json:"lang"`
-	BudgetUSDMonth int    `json:"budget_usd_month"`
-	Paused         bool   `json:"paused,omitempty"`
+	Name string `json:"name"`
+	// Role is "instance" (default) or "template". A template legitimately has
+	// no .beads — shipping one would seed every new project with someone
+	// else's issues (fw-fsa.6).
+	Role string `json:"role,omitempty"`
+	// SkipStages are stages this repo has no use for. brax-tennis-rl is a
+	// training project with nothing deployed, so an SLO prober would be
+	// cargo-culting a stage into a repo that cannot use it (fw-fsa.8).
+	SkipStages     []string `json:"skip_stages,omitempty"`
+	Path           string   `json:"path"`
+	Lang           string   `json:"lang"`
+	BudgetUSDMonth int      `json:"budget_usd_month"`
+	Paused         bool     `json:"paused,omitempty"`
 }
 
 type Agent struct {
