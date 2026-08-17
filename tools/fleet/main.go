@@ -398,12 +398,12 @@ func defaultRoster() string {
 		return p
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		p := filepath.Join(home, "Workspace", "agentic-flywheel", "fleet", "roster.json")
+		p := filepath.Join(home, "Workspace", "agentic-flywheel", ".flywheel", "roster.json")
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
 	}
-	return "fleet/roster.json"
+	return ".flywheel/roster.json"
 }
 
 func usage() {

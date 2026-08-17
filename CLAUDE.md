@@ -19,8 +19,10 @@ tooling that runs *across* repos. Per-project tooling lives in the templates
   the fleet makes is a claim about behaviour under failure.
 - Deliberate shortcuts get a `// ponytail:` comment naming the ceiling and the
   upgrade path.
-- `go build ./tools/fleet/` drops a binary that collides with the `fleet/`
-  config directory. Always build with `-o`.
+- `go build ./...` works. The roster lives in `.flywheel/roster.json`; it used
+  to sit in `fleet/`, where the binary `go build` produces collided with the
+  directory (fw-oef.10). A papercut that needs a documented workaround is one
+  that trips every newcomer, so it was removed rather than documented around.
 
 ## Agents
 
@@ -46,3 +48,18 @@ tooling that runs *across* repos. Per-project tooling lives in the templates
 - Small commits, imperative subject, reference the bead: `fw-oef.3: cap builders`.
 - Never bypass a failing hook. If a gate gets skipped twice, delete it or
   automate it.
+
+## Two process decisions
+
+**`--no-verify` is allowed only during a replay** — a rebase, merge, or
+cherry-pick, where the tree is transiently inconsistent and a commit mid-replay
+may not build even though neither endpoint is broken. The pre-commit hook's
+`replay-guard` detects that state and records it, so the skip is measured
+rather than silent. Outside a replay, `--no-verify` is a bypass and the rule
+stands: never (fw-e7e.6).
+
+**Beads bookkeeping rides along with the work.** A `beads:` commit goes on the
+feature branch and through the PR, not straight to `main`. The alternative —
+direct pushes for board state — put fifteen commits past the Validate gate
+before anyone noticed, and the bypass detector deliberately excludes
+bookkeeping subjects so it could never have flagged them (fw-cpd.6).

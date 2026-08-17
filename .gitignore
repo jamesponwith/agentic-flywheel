@@ -1,4 +1,4 @@
-# `go build ./tools/fleet/` drops a binary named `fleet` in the repo root,
-# which collides with the fleet/ config directory. Always build with -o.
+# `go build ./tools/fleet/` drops a binary named `fleet` in the repo root.
+# The roster moved to .flywheel/ so the collision with a config directory is
+# gone (fw-oef.10); the stray binary is still worth ignoring.
 /fleet
-!/fleet/
