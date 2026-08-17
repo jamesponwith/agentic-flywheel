@@ -3,3 +3,6 @@ STOP
 # Per-worktree, per-run identity written by the spawner. Committing it would
 # freeze one builder run into the repo (fw-rb3).
 agent
+
+# flaky quarantine ledger is per-machine detection state
+flaky.jsonl
