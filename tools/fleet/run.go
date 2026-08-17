@@ -200,7 +200,28 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// under a symlink, and two agents on different keys never conflict.
 	cmd.Env = append(clean, "FLYWHEEL_AGENT="+a.Agent, "FLYWHEEL_PROJECT_KEY="+repo.Path)
 
+	// Poll the kill switch while the builder runs. Without this the switch only
+	// gated ALLOCATION: a human pulling it at 2am would watch every in-flight
+	// builder run to completion, which is not what a kill switch is for.
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				if _, halted := stopped([]string{repo.Path}); halted {
+					cancel() // kills the child via the context
+					return
+				}
+			}
+		}
+	}()
+
 	runErr := cmd.Run()
+	close(done)
 	b.Took = time.Since(b.Started)
 
 	// Exit 0 is NOT success. The first live run blocked on permissions, did
