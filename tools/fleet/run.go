@@ -128,6 +128,20 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		_ = git2(repo.Path, "worktree", "remove", "--force", wt)
 	}()
 
+	// blackbird ties a name to its FIRST registration token, permanently. A
+	// run that registers <repo>/builder and drops the token burns that name —
+	// every later run gets UNAUTHENTICATED and invents <repo>/builder-<bead>
+	// instead, fragmenting the audit trail one identity at a time (fw-t7d).
+	// So the token lives in XDG state, outside every repo, keyed by the stable
+	// name, and the skill is told to reuse it.
+	if home, err := os.UserHomeDir(); err == nil {
+		state := os.Getenv("XDG_STATE_HOME")
+		if state == "" {
+			state = filepath.Join(home, ".local", "state")
+		}
+		_ = os.MkdirAll(filepath.Join(state, "flywheel"), 0o700)
+	}
+
 	// Write the builder's identity where guard.sh can read it without an
 	// env-prefixed invocation the allowlist cannot match.
 	if err := os.MkdirAll(filepath.Join(wt, ".flywheel"), 0o755); err == nil {
