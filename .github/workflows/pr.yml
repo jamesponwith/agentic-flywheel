@@ -14,7 +14,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - run: BASE_REF=origin/${{ github.base_ref }} tools/flywheel/bead-lint.sh
+      # Decisions that got re-derived without being recorded. Advisory, and
+      # exits 0 whatever it finds — its flags are ::warning:: annotations next
+      # to the diff, never a failed check (ADR 0001).
+      - run: go run ./tools/fleet adr-drift -base origin/${{ github.base_ref }}
 
   unit:
     runs-on: ubuntu-latest
