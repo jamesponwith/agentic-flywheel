@@ -68,10 +68,21 @@ func runGuard(t *testing.T, dir, agent string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(guardPath(t), args...)
 	cmd.Dir = dir
-	cmd.Env = append(hermeticEnv(), "FLYWHEEL_HOME="+filepath.Join(dir, "home"))
-	if agent != "" {
-		cmd.Env = append(cmd.Env, "FLYWHEEL_AGENT="+agent)
+	// Strip any inherited FLYWHEEL_AGENT before deciding. Appending only when
+	// agent != "" does NOT mean unset — it means "whatever the parent had",
+	// so a test asserting the unset behaviour passed for the wrong reason
+	// whenever this suite ran from inside a builder (fw-kdu).
+	env := make([]string, 0, len(hermeticEnv())+2)
+	for _, kv := range hermeticEnv() {
+		if !strings.HasPrefix(kv, "FLYWHEEL_AGENT=") {
+			env = append(env, kv)
+		}
 	}
+	env = append(env, "FLYWHEEL_HOME="+filepath.Join(dir, "home"))
+	if agent != "" {
+		env = append(env, "FLYWHEEL_AGENT="+agent)
+	}
+	cmd.Env = env
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -216,6 +227,24 @@ func TestUnsetAgentIsRecordedAsUnknown(t *testing.T) {
 	}
 	if rec["agent"] != "unknown" {
 		t.Errorf("agent = %q, want %q", rec["agent"], "unknown")
+	}
+}
+
+// The regression the helper hid: with FLYWHEEL_AGENT set in the environment,
+// asking for the unset case must still get the unset case.
+func TestUnsetAgentIgnoresAnInheritedValue(t *testing.T) {
+	t.Setenv("FLYWHEEL_AGENT", "inherited/impostor")
+	dir := scratch(t)
+	if _, code := runGuard(t, dir, "", "log", "probe"); code != 0 {
+		t.Fatalf("exit %d; want 0", code)
+	}
+	var rec map[string]string
+	lines := readLines(t, filepath.Join(dir, ".flywheel", "agent-log.jsonl"))
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec["agent"] == "inherited/impostor" {
+		t.Error("an inherited FLYWHEEL_AGENT leaked into a test asking for unset")
 	}
 }
 
