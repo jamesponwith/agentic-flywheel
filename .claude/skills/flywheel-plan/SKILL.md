@@ -37,6 +37,10 @@ Every bead needs:
 - **Acceptance criteria you could verify** and, ideally, that a test could.
   "Works well" is not acceptance. "A simulated outage produces one incident
   with open and close timestamps" is.
+- **Cross-repo dependencies as gates, not prose.** If a bead cannot start until
+  work lands in another repo, create a `gh:pr` gate (ADR 0014) rather than
+  writing "after the template merges" in the description. The coordinator
+  cannot read prose, and an unattended builder will ignore it.
 - **Dependencies** that are real. Only add an edge when the second bead
   genuinely cannot start until the first lands — a graph that over-constrains
   looks tidy and starves the queue.
