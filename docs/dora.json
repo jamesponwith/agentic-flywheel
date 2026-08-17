@@ -1,0 +1,42 @@
+{
+  "agent": {
+    "autonomous_prs": {
+      "clean_rate": 0.9285714285714286,
+      "merged_without_human_edits": 26,
+      "opened": 28
+    },
+    "first_pass_gate": {
+      "green": 34,
+      "rate": 1,
+      "total": 34
+    },
+    "review_round_trips": {
+      "median": 0,
+      "samples": 34
+    },
+    "rework_commits_after_open": {
+      "median": 0,
+      "samples": 34
+    }
+  },
+  "change_failure_rate": {
+    "incidents": 0,
+    "rate": 0,
+    "releases": 0
+  },
+  "deploy_frequency": {
+    "per_week": 0,
+    "releases_last_30d": 0,
+    "releases_total": 0
+  },
+  "generated_at": "2026-08-17T06:24:53Z",
+  "lead_time_hours": {
+    "median": 0,
+    "samples": 0
+  },
+  "mttr_hours": {
+    "median": 0,
+    "samples": 0
+  },
+  "repo": "jamesponwith/agentic-flywheel"
+}
