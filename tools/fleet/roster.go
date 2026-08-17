@@ -102,6 +102,14 @@ func LoadRoster(path string) (Roster, error) {
 	}
 	for i := range r.Repos {
 		r.Repos[i].Path = expandPath(r.Repos[i].Path, r.WorkspaceRoot)
+		// Resolve symlinks once, here. blackbird keys reservations by
+		// project_key: two agents that derive different keys for the same repo
+		// do not conflict at all, which is the failure territory reservations
+		// exist to prevent, in its most dangerous form — silent (fw-wb2.9).
+		// One canonical path, decided in one place, passed to every builder.
+		if resolved, err := filepath.EvalSymlinks(r.Repos[i].Path); err == nil {
+			r.Repos[i].Path = resolved
+		}
 	}
 	r.Caps = r.Caps.normalized()
 	if r.Caps.ReviewWeightPerNight <= 0 || r.Caps.ConcurrentBuilders <= 0 || r.Caps.ReposPerNight <= 0 {
