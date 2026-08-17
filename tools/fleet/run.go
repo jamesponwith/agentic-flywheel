@@ -105,6 +105,12 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	wt := filepath.Join(filepath.Dir(repo.Path), fmt.Sprintf("%s-%s", repo.Name, a.Bead))
 	b.Worktree = wt
 
+	// Record the exact commit the worktree starts from. Counting against main
+	// would credit the builder with whatever its base branch already carried —
+	// the first attempt at this check would have called a no-op green because
+	// the worktree was cut from a feature branch, not from main.
+	base := headOf(repo.Path)
+
 	// Worktree first: if this fails, nothing has been claimed or edited.
 	if err := git2(repo.Path, "worktree", "add", "-b", "bead/"+a.Bead, wt); err != nil {
 		b.Outcome, b.Detail = "error", "worktree: "+err.Error()
@@ -159,7 +165,7 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// green. A builder that produced no commits produced no work, whatever its
 	// exit code says, and calling that green is the same class of lie as an
 	// empty review ledger reading as "no findings".
-	commits := commitsOn(repo.Path, "bead/"+a.Bead)
+	commits := commitsSince(repo.Path, base, "bead/"+a.Bead)
 
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
@@ -179,10 +185,25 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	return b
 }
 
-// commitsOn counts commits a branch added over the repo's default branch —
-// the only evidence that a builder actually did something.
-func commitsOn(dir, branch string) int {
-	cmd := exec.Command("git", "rev-list", "--count", "main.."+branch)
+// headOf returns the commit a worktree will be cut from.
+func headOf(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// commitsSince counts what the builder itself added — commits between the base
+// the worktree was cut from and the branch head. This is the only evidence a
+// builder did work, and it must not credit whatever the base already carried.
+func commitsSince(dir, base, branch string) int {
+	if base == "" {
+		return 0
+	}
+	cmd := exec.Command("git", "rev-list", "--count", base+".."+branch)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
