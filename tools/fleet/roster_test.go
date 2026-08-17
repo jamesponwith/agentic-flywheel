@@ -61,7 +61,7 @@ func TestLoadRosterExpandsPaths(t *testing.T) {
 func TestCommittedRosterHasNoHostPaths(t *testing.T) {
 	// This repo is public. A roster that hardcodes /home/<someone> publishes
 	// the maintainer's username and only works on one machine.
-	b, err := os.ReadFile("../../fleet/roster.json")
+	b, err := os.ReadFile("../../.flywheel/roster.json")
 	if err != nil {
 		t.Skip("roster not present")
 	}
