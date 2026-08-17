@@ -38,6 +38,7 @@ func main() {
 	source := fs.String("source", "", "template repo to copy missing artifacts from (doctor -fix)")
 	fix := fs.Bool("fix", false, "install missing artifacts from -source; never overwrites")
 	self := fs.Bool("self", false, "diagnose the current repo instead of a roster")
+	onlyBead := fs.String("bead", "", "run exactly this bead, ignoring the queue (for a supervised run)")
 	execute := fs.Bool("execute", false, "actually spawn builders (default is a dry run)")
 	perBuilder := fs.Duration("per-builder", DefaultRunOpts().PerBuilder, "wall-clock cap per builder")
 
@@ -82,7 +83,7 @@ func main() {
 	case "doctor":
 		err = doDoctor(*rosterPath, *source, *fix, *asJSON, *self)
 	case "run":
-		err = doRun(*rosterPath, *execute, *perBuilder, *asJSON)
+		err = doRun(*rosterPath, *execute, *perBuilder, *onlyBead, *asJSON)
 	default:
 		usage()
 		os.Exit(2)
@@ -341,11 +342,13 @@ func doDoctor(rosterPath, source string, fix, asJSON, self bool) error {
 	return nil
 }
 
-func doRun(rosterPath string, execute bool, perBuilder time.Duration, asJSON bool) error {
+func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead string, asJSON bool) error {
 	r, err := LoadRoster(rosterPath)
 	if err != nil {
 		return err
 	}
+	OnlyBead = onlyBead
+	defer func() { OnlyBead = "" }()
 	plan, err := AllocateWithLoad(r, func(p string) bdClient {
 		return bdClient{dir: p, run: execBD}
 	}, ghReviewLoad, time.Now())
@@ -355,6 +358,9 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, asJSON boo
 	if plan.Stopped != "" {
 		fmt.Printf("HALTED — kill switch set (%s)\n", plan.Stopped)
 		return nil
+	}
+	if onlyBead != "" && len(plan.Assignments) == 0 {
+		return fmt.Errorf("%s is not allocatable — blocked, gated, claimed, human-only, an epic, or over the weight budget", onlyBead)
 	}
 	if len(plan.Assignments) == 0 {
 		fmt.Println("nothing to do")
@@ -418,6 +424,6 @@ func usage() {
   fleet hydrate [-roster PATH] [-json]
   fleet bypasses [-roster PATH] [-since 30.days] [-json]
   fleet doctor [-roster PATH | -self] [-fix -source PATH] [-json]
-  fleet run [-roster PATH] [-execute] [-per-builder 25m] [-json]
+  fleet run [-roster PATH] [-execute] [-bead ID] [-per-builder 25m] [-json]
 `)
 }

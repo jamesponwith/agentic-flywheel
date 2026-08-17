@@ -29,7 +29,8 @@ type Builder struct {
 	Worktree string        `json:"worktree"`
 	Started  time.Time     `json:"started"`
 	Took     time.Duration `json:"took"`
-	Outcome  string        `json:"outcome"` // green | abandoned | timeout | error | skipped
+	Outcome  string        `json:"outcome"` // green | no-op | abandoned | timeout | error | skipped
+	Commits  int           `json:"commits"` // evidence: green requires > 0
 	Detail   string        `json:"detail"`
 }
 
@@ -153,6 +154,13 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	runErr := cmd.Run()
 	b.Took = time.Since(b.Started)
 
+	// Exit 0 is NOT success. The first live run blocked on permissions, did
+	// nothing, explained itself clearly, and exited 0 — and was reported as
+	// green. A builder that produced no commits produced no work, whatever its
+	// exit code says, and calling that green is the same class of lie as an
+	// empty review ledger reading as "no findings".
+	commits := commitsOn(repo.Path, "bead/"+a.Bead)
+
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
 		b.Outcome = "timeout"
@@ -160,11 +168,29 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	case runErr != nil:
 		b.Outcome = "abandoned"
 		b.Detail = fmt.Sprintf("%v — see %s", runErr, logPath)
+	case commits == 0:
+		b.Outcome = "no-op"
+		b.Detail = fmt.Sprintf("agent exited cleanly but committed nothing — read %s before trusting this", logPath)
 	default:
 		b.Outcome = "green"
-		b.Detail = "see " + logPath
+		b.Detail = fmt.Sprintf("%d commit(s), see %s", commits, logPath)
 	}
+	b.Commits = commits
 	return b
+}
+
+// commitsOn counts commits a branch added over the repo's default branch —
+// the only evidence that a builder actually did something.
+func commitsOn(dir, branch string) int {
+	cmd := exec.Command("git", "rev-list", "--count", "main.."+branch)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &n)
+	return n
 }
 
 func git2(dir string, args ...string) error {
@@ -183,8 +209,8 @@ func Digest(bs []Builder) string {
 	for _, b := range bs {
 		counts[b.Outcome]++
 	}
-	fmt.Fprintf(&sb, "%d builder(s): %d green, %d abandoned, %d timeout, %d error, %d skipped\n",
-		len(bs), counts["green"], counts["abandoned"], counts["timeout"], counts["error"], counts["skipped"])
+	fmt.Fprintf(&sb, "%d builder(s): %d green, %d no-op, %d abandoned, %d timeout, %d error, %d skipped\n",
+		len(bs), counts["green"], counts["no-op"], counts["abandoned"], counts["timeout"], counts["error"], counts["skipped"])
 	for _, b := range bs {
 		fmt.Fprintf(&sb, "  %-22s %-12s %-10s %-8s %s\n",
 			b.Repo, b.Bead, b.Outcome, b.Took.Round(time.Second), b.Detail)
