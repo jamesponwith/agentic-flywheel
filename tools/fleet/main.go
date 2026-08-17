@@ -395,7 +395,7 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 		return nil
 	}
 	if onlyBead != "" && len(plan.Assignments) == 0 {
-		return fmt.Errorf("%s is not allocatable — blocked, gated, claimed, human-only, an epic, or over the weight budget", onlyBead)
+		return fmt.Errorf("%s is not allocatable: %s", onlyBead, whyNotAllocatable(r, onlyBead))
 	}
 	if len(plan.Assignments) == 0 {
 		fmt.Println("nothing to do")
@@ -432,6 +432,42 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 	}
 	fmt.Println(Digest(builders))
 	return nil
+}
+
+// whyNotAllocatable names the single reason a bead was excluded. Listing all
+// six possibilities tells the reader nothing they can act on (fw-lb8.7).
+func whyNotAllocatable(r Roster, id string) string {
+	return whyNotAllocatableWith(r, id, func(p string) bdClient {
+		return bdClient{dir: p, run: execBD}
+	})
+}
+
+func whyNotAllocatableWith(r Roster, id string, open openClient) string {
+	for _, repo := range r.Repos {
+		b, err := open(repo.Path).show(id)
+		if err != nil {
+			continue
+		}
+		switch {
+		case b.Status == "closed":
+			return "it is already closed"
+		case b.Status == "in_progress":
+			if holder, exp, ok := b.Lease(); ok {
+				return fmt.Sprintf("claimed by %s until %s", holder, exp.Format(time.RFC3339))
+			}
+			return "in progress with no lease — a human may hold it, or a builder died without releasing (reclaim will not touch it)"
+		case b.Type == "epic":
+			return "it is an epic, a container rather than work"
+		case b.Type == "decision":
+			return "it is a decision, which a human makes"
+		case b.HasLabel("human-only"):
+			return "it is labelled human-only"
+		case Weight(b) > r.Caps.ReviewWeightPerNight:
+			return fmt.Sprintf("weight %d exceeds the whole nightly budget of %d", Weight(b), r.Caps.ReviewWeightPerNight)
+		}
+		return "blocked by an open dependency or gate"
+	}
+	return "no roster repo has a bead with that id"
 }
 
 func defaultRoster() string {
