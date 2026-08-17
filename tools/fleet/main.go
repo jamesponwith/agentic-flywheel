@@ -37,6 +37,7 @@ func main() {
 	since := fs.String("since", "", "only consider history since this git date (e.g. 30.days)")
 	source := fs.String("source", "", "template repo to copy missing artifacts from (doctor -fix)")
 	fix := fs.Bool("fix", false, "install missing artifacts from -source; never overwrites")
+	self := fs.Bool("self", false, "diagnose the current repo instead of a roster")
 	execute := fs.Bool("execute", false, "actually spawn builders (default is a dry run)")
 	perBuilder := fs.Duration("per-builder", DefaultRunOpts().PerBuilder, "wall-clock cap per builder")
 
@@ -79,7 +80,7 @@ func main() {
 	case "bypasses":
 		err = doBypasses(*rosterPath, *since, *asJSON)
 	case "doctor":
-		err = doDoctor(*rosterPath, *source, *fix, *asJSON)
+		err = doDoctor(*rosterPath, *source, *fix, *asJSON, *self)
 	case "run":
 		err = doRun(*rosterPath, *execute, *perBuilder, *asJSON)
 	default:
@@ -282,10 +283,18 @@ func doBypasses(rosterPath, since string, asJSON bool) error {
 	return nil
 }
 
-func doDoctor(rosterPath, source string, fix, asJSON bool) error {
-	r, err := LoadRoster(rosterPath)
-	if err != nil {
-		return err
+func doDoctor(rosterPath, source string, fix, asJSON, self bool) error {
+	var r Roster
+	if self {
+		// An instance checking its own drift has no roster — it IS one repo.
+		// Role and skipped stages come from .flywheel/repo.json if present, so
+		// a training project still declares it has no use for Operate.
+		r = selfRoster()
+	} else {
+		var err error
+		if r, err = LoadRoster(rosterPath); err != nil {
+			return err
+		}
 	}
 	var all []Diagnosis
 	for _, repo := range r.Repos {
@@ -403,7 +412,7 @@ func usage() {
   fleet allocate [-roster PATH] [-json]
   fleet hydrate [-roster PATH] [-json]
   fleet bypasses [-roster PATH] [-since 30.days] [-json]
-  fleet doctor [-roster PATH] [-fix -source PATH] [-json]
+  fleet doctor [-roster PATH | -self] [-fix -source PATH] [-json]
   fleet run [-roster PATH] [-execute] [-per-builder 25m] [-json]
 `)
 }

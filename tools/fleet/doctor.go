@@ -10,6 +10,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -57,6 +58,7 @@ var Manifest = []Artifact{
 
 	{".github/workflows/learn.yml", "learn", true, "", "weekly DORA + agent snapshot; the trend line", false, false},
 	{"docs/dora.html", "learn", false, "", "renders the snapshot", false, false},
+	{".github/workflows/drift.yml", "distribution", false, "", "notices when this repo falls behind the flywheel", false, false},
 
 	{"tools/flywheel/guard.sh", "agents", true, "", "kill switch, audit log, review ledger", false, false},
 	{".claude/skills/flywheel-next", "agents", false, "", "the unit of autonomous work", false, false},
@@ -203,4 +205,44 @@ func (d Diagnosis) String() string {
 		fmt.Fprintf(&b, "    %s %-38s %-9s %s\n", mark, m.Path, m.Stage, m.Why)
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// selfRoster builds a one-repo roster for the current working directory, so an
+// instance can check its own drift without carrying a fleet roster it has no
+// business knowing about.
+//
+// Role and skipped stages are read from .flywheel/repo.json when present —
+// otherwise a training project would be told every week that it is missing an
+// Operate stage it has no use for, which is how a check becomes noise.
+func selfRoster() Roster {
+	repo := Repo{Name: filepath.Base(mustCwd()), Path: mustCwd()}
+	if b, err := os.ReadFile(filepath.Join(repo.Path, ".flywheel", "repo.json")); err == nil {
+		var decl struct {
+			Role       string   `json:"role"`
+			Lang       string   `json:"lang"`
+			SkipStages []string `json:"skip_stages"`
+		}
+		if json.Unmarshal(b, &decl) == nil {
+			repo.Role, repo.Lang, repo.SkipStages = decl.Role, decl.Lang, decl.SkipStages
+		}
+	}
+	if repo.Lang == "" {
+		if _, err := os.Stat(filepath.Join(repo.Path, "go.mod")); err == nil {
+			repo.Lang = "go"
+		} else if _, err := os.Stat(filepath.Join(repo.Path, "pyproject.toml")); err == nil {
+			repo.Lang = "python"
+		}
+	}
+	return Roster{
+		Caps:  Caps{ReviewWeightPerNight: 8, ConcurrentBuilders: 1, ReposPerNight: 1},
+		Repos: []Repo{repo},
+	}
+}
+
+func mustCwd() string {
+	d, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return d
 }
