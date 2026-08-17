@@ -200,6 +200,11 @@ func doHydrate(rosterPath string, asJSON bool) error {
 	if err != nil {
 		return err
 	}
+	// Resolve any gates whose PR has merged before diagnosing readiness — a
+	// stale gate holds real work out of the queue (ADR 0014).
+	if _, err := execBD(".", "gate", "check"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: gate check: %v\n", err)
+	}
 	res := Hydrate(r, liveHydrateOps())
 	if asJSON {
 		enc := json.NewEncoder(os.Stdout)
