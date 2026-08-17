@@ -17,7 +17,6 @@ package main
 
 import (
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -121,9 +120,7 @@ func DetectBypasses(repo, dir, since string) ([]Bypass, error) {
 }
 
 func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	b, err := cmd.Output()
+	b, err := inDir(dir, "git", args...).Output()
 	return string(b), err
 }
 

@@ -26,6 +26,7 @@ func bdIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
+	cmd.Env = hermeticEnv() // bd is a git client too
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("bd %s: %v\n%s", strings.Join(args, " "), err, out)
@@ -40,9 +41,7 @@ func scratchRepo(t *testing.T) string {
 	for _, args := range [][]string{
 		{"init", "-q"}, {"config", "user.email", "conformance@test"}, {"config", "user.name", "conformance"},
 	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
+		if out, err := gitCmd(dir, args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}

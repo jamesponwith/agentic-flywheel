@@ -172,7 +172,9 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// parent shell rather than its assigned one — attribution in the ADR 0003
 	// log has to come from the assignment, not from whatever the environment
 	// happened to carry.
-	env := os.Environ()
+	// hermeticEnv, not os.Environ: a builder that inherited GIT_DIR would edit
+	// the spawner's repository from inside its own worktree.
+	env := hermeticEnv()
 	clean := env[:0]
 	for _, kv := range env {
 		if !strings.HasPrefix(kv, "FLYWHEEL_AGENT=") {
@@ -211,9 +213,7 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 
 // headOf returns the commit a worktree will be cut from.
 func headOf(dir string) string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := inDir(dir, "git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		return ""
 	}
@@ -227,9 +227,7 @@ func commitsSince(dir, base, branch string) int {
 	if base == "" {
 		return 0
 	}
-	cmd := exec.Command("git", "rev-list", "--count", base+".."+branch)
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := inDir(dir, "git", "rev-list", "--count", base+".."+branch).Output()
 	if err != nil {
 		return 0
 	}
@@ -239,9 +237,7 @@ func commitsSince(dir, base, branch string) int {
 }
 
 func git2(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := inDir(dir, "git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("%s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
 	}
 	return nil

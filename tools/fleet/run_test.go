@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os/exec"
 	"testing"
 )
 
@@ -12,9 +11,7 @@ func TestCommitsSinceIgnoresTheBase(t *testing.T) {
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
-		c := exec.Command("git", args...)
-		c.Dir = dir
-		if out, err := c.CombinedOutput(); err != nil {
+		if out, err := gitCmd(dir, args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
