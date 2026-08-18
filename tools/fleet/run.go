@@ -264,7 +264,25 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// reports "not allocatable". The spawner knows the outcome, so it restores.
 	if commits == 0 && b.Outcome != "green" {
 		bd := bdClient{dir: repo.Path, run: execBD}
-		if err := bd.reopen(a.Bead); err == nil {
+		// Never reopen a bead somebody legitimately closed. A builder can
+		// correctly finish with no commits — "already done elsewhere, nothing
+		// to change" — and blindly reopening discards that close reason and
+		// makes the fleet redo the work.
+		if cur, err := bd.show(a.Bead); err == nil && cur.Status == "closed" {
+			_ = bd.note(a.Bead, fmt.Sprintf(
+				"Builder %s ended as %s with no commits, but this bead is closed — leaving it closed. See %s.",
+				a.Agent, b.Outcome, logPath))
+		} else if err := bd.reopen(a.Bead); err == nil {
+			// Clear the lease too. Reopening while leaving lease metadata
+			// behind produced a bead that was open, annotated as allocatable,
+			// filtered out by allocate, and reported as "blocked by an open
+			// dependency or gate" — which it was not.
+			if cur.Metadata != nil {
+				md := copyMD(cur.Metadata)
+				delete(md, leaseHolderKey)
+				delete(md, leaseExpiresKey)
+				_ = bd.setMetadata(a.Bead, md)
+			}
 			_ = bd.note(a.Bead, fmt.Sprintf(
 				"Builder %s ended as %s having committed nothing; the spawner returned this bead to open so it is allocatable again (fw-lb8.7). See %s.",
 				a.Agent, b.Outcome, logPath))

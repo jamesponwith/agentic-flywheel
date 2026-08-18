@@ -96,7 +96,7 @@ func Diagnose(repo Repo) Diagnosis {
 		if repo.skips(a.Stage) {
 			continue // this repo has declared it has no use for the stage
 		}
-		if _, err := os.Stat(filepath.Join(repo.Path, a.Path)); err == nil {
+		if present(repo.Path, a.Path) {
 			d.Present++
 			continue
 		}
@@ -178,6 +178,26 @@ func copyPath(src, dst string) error {
 // is a third state alongside present and missing: a training project with
 // nothing deployed is not BEHIND on Operate, it simply has no use for it, and a
 // checklist that reports a permanent false gap trains people to ignore it.
+// present reports whether an artifact exists AND is tracked by git.
+//
+// os.Stat alone answered "a filename existed on this filesystem at this
+// instant", which is not the question. Three repos reported "complete" on
+// artifacts that were never committed — including drift.yml, the check meant
+// to catch exactly that, which 404s on GitHub in those repos. What a clone and
+// CI see is what matters, so an untracked file is a gap.
+func present(repoPath, rel string) bool {
+	if _, err := os.Stat(filepath.Join(repoPath, rel)); err != nil {
+		return false
+	}
+	// A directory counts as tracked if git tracks anything inside it.
+	out, err := inDir(repoPath, "git", "ls-files", "--error-unmatch", rel).Output()
+	if err == nil && strings.TrimSpace(string(out)) != "" {
+		return true
+	}
+	out, err = inDir(repoPath, "git", "ls-files", "--", rel).Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
 func (r Repo) skips(stage string) bool {
 	for _, s := range r.SkipStages {
 		if s == stage {
