@@ -14,12 +14,17 @@ import (
 // The switch is a file on purpose. Stopping the fleet must not require a
 // database, a network, or a push — see tools/flywheel/guard.sh.
 func stopped(repoPaths []string) (string, bool) {
-	home, err := os.UserHomeDir()
-	if err == nil {
-		fleetHome := os.Getenv("FLYWHEEL_HOME")
-		if fleetHome == "" {
+	// FLYWHEEL_HOME is checked even when the home directory cannot be resolved.
+	// Nesting this inside `if err == nil` meant that with HOME unset — which is
+	// exactly the stripped environment unattended operation runs in — the
+	// fleet-wide kill switch was skipped entirely.
+	fleetHome := os.Getenv("FLYWHEEL_HOME")
+	if fleetHome == "" {
+		if home, err := os.UserHomeDir(); err == nil {
 			fleetHome = filepath.Join(home, ".flywheel")
 		}
+	}
+	if fleetHome != "" {
 		if b, err := os.ReadFile(filepath.Join(fleetHome, "STOP")); err == nil {
 			return "fleet-wide: " + strings.TrimSpace(string(b)), true
 		}
