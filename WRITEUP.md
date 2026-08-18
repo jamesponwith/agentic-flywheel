@@ -32,7 +32,7 @@ got a fast lane the same day, because a slow gate is a skipped gate.
 
 **Validate.** The PR pipeline: lint plus tests, green in ~30 seconds, no
 green no merge. The one deliberate departure from the C1 shape: AI code
-review runs *locally, in a pre-push git hook* — no CI minutes, no API-key
+review runs *locally, inside the agent's own loop* — no CI minutes, no API-key
 secrets, and findings land before the PR exists. It's advisory; I'm the
 merge authority. It earns its keep: across the pilots it caught duplicated
 types, dead config knobs, and a config bug that would have wasted an
@@ -62,10 +62,10 @@ loop in the open.
 ## What the pilots proved
 
 The router went from template to released v0.1.0 — priority failover,
-quality canaries, learn/action modes, hedging — through eleven gated PRs.
+quality canaries, learn/action modes, hedging — through nineteen gated PRs.
 The tennis agent went from spec to three completed phases (95.2%
 interception, 71.7% returns, self-play rallies that lengthen across
-generations) through twenty-three more. Bootstrapping the tennis project
+generations) through twenty-eight more. Bootstrapping the tennis project
 from the Python template took **2 minutes 55 seconds** against a 30-minute
 budget. Every resilience and RL claim in both repos has a recorded demo or
 a curve behind it.
@@ -117,13 +117,16 @@ Whether any of this is *worth* it, in full. Some of it I can now answer,
 because the dashboard grew a second panel pointed at the agents instead of
 the code:
 
-- **First-pass gate rate** — 100% on the router (13/13), 96% on the tennis
-  agent (24/25). PRs that were green on their first CI run.
-- **Rework** — median zero commits after a PR opened, across both.
+I had two numbers here — a 100% first-pass gate rate and zero median rework —
+and an adversarial review of my own tooling showed both were artefacts of how
+I measured, not facts about the work. The gate query returns the state of
+checks *after* any rerun, so it can never see a first attempt that failed.
+Rework counted commits dated after a PR opened, in a squash-merge workflow
+where the commit is authored seconds before. Both were pinned near their best
+value by construction.
 
-Those are better than I expected, and I distrust them slightly for that
-reason: a solo repo has no reviewer to send work back, so "no rework" partly
-measures the absence of a second opinion rather than the presence of quality.
+They now report `measurable: false` with the reason, which is the honest
+reading and a considerably less flattering one.
 
 What I still can't tell you: what an agent-built feature costs in tokens,
 and whether the AI reviewer catches more than it costs. The first needs cost
