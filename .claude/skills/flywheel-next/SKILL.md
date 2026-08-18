@@ -91,6 +91,15 @@ reason to proceed unprotected.
 
 ## 5. Build it in a worktree
 
+**If the spawner started you, you are already in the worktree** and the branch
+`bead/<id>` already exists — check with `git rev-parse --abbrev-ref HEAD` before
+doing anything. Creating it again fails with *"a branch named 'bead/X' already
+exists"*, and working around that by picking a different branch name makes the
+spawner classify your run as **no-op** and write into the bead that you
+committed nothing, while your commits sit on the branch you renamed.
+
+Only when you are running by hand, outside a spawner:
+
 ```bash
 git worktree add ../<repo>-<bead-id> -b bead/<bead-id>
 ```
