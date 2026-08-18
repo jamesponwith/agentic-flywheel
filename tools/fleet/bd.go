@@ -71,6 +71,14 @@ func errorsAs(err error, target **exec.ExitError) bool {
 	return false
 }
 
+// combined runs bd capturing BOTH streams. bd reports slot contention on
+// stderr, which a stdout-only capture silently misses.
+func (c bdClient) combined(dir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
+}
+
 type bdClient struct {
 	dir string
 	run runner

@@ -245,20 +245,15 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		b.Outcome = "green"
 		b.Detail = fmt.Sprintf("%d commit(s), see %s", commits, logPath)
 	}
-	// Serialise the moment a branch reaches the shared remote (fw-lb8.4).
-	// Worktrees isolate edits, not merges: two builders can each be green in
-	// isolation and still produce an incoherent main. Builds stay parallel —
-	// they are the slow part and genuinely independent — and only the push is
-	// taken under the slot.
-	if commits > 0 && opts.Concurrency > 1 {
-		slot := mergeSlot{bd: bdClient{dir: repo.Path, run: execBD}}
-		slot.ensure()
-		if ok, why := slot.acquire(10*time.Minute, time.Now); ok {
-			defer slot.release()
-		} else {
-			b.Detail += " — " + why
-		}
-	}
+	// NOTE: the merge slot is deliberately NOT taken here. It used to be, and it
+	// did nothing — this point is after cmd.Run(), and the agent pushes inside
+	// its own run, so the slot was acquired and released around an
+	// already-pushed branch. Traced: push at …123.813, acquire at …124.635. It
+	// cost up to ten minutes of uncancellable wall clock per green builder and
+	// prevented no race at all.
+	//
+	// The push happens in the agent, so the agent holds the slot:
+	// /flywheel-next step 7 acquires before pushing and releases after.
 
 	b.Commits = commits
 
