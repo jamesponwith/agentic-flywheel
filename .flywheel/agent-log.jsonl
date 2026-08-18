@@ -20,3 +20,5 @@
 {"ts":"2026-08-17T01:33:41Z","event":"bead.pr_opened","agent":"agentic-flywheel/builder","repo":"agentic-flywheel","bead":"fw-7mw","pr":"20"}
 {"ts":"2026-08-17T02:05:42Z","event":"probe.attribution","agent":"unknown","repo":"agentic-flywheel","bead":"test"}
 {"ts":"2026-08-17T02:05:49Z","event":"probe.attribution","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"test"}
+{"ts":"2026-08-17T14:36:54Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"D2 fix check"}
+{"ts":"2026-08-17T14:36:54Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}

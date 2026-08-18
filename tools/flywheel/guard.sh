@@ -18,7 +18,20 @@ FLYWHEEL_HOME="${FLYWHEEL_HOME:-$HOME/.flywheel}"
 # invocation, so a permitted agent could not set FLYWHEEL_AGENT on the call and
 # every audit entry it wrote said "unknown" — honest but degraded, and exactly
 # the attribution weakness fw-7mw was about.
+# --show-toplevel inside a worktree returns the WORKTREE, and .flywheel/STOP is
+# gitignored so it never checks out there. Builders run only in worktrees
+# (run.go sets cmd.Dir to one), so a switch thrown in the main tree was invisible
+# to every agent it was meant to stop — verified: STOPPED in the main tree,
+# runnable in a worktree of the same repo.
+#
+# --git-common-dir resolves to the ORIGINAL repo's .git for a linked worktree,
+# so the switch is now checked where the human set it.
 REPO_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+_common="$(git rev-parse --git-common-dir 2>/dev/null || echo)"
+case "$_common" in
+  "" | ".git") MAIN_REPO_DIR="$REPO_DIR" ;;
+  *) MAIN_REPO_DIR="$(cd "$(dirname "$_common")" 2>/dev/null && pwd || echo "$REPO_DIR")" ;;
+esac
 REPO_STATE="$REPO_DIR/.flywheel"
 LOG="$REPO_STATE/agent-log.jsonl"
 LEDGER="$REPO_STATE/review.jsonl"
@@ -50,6 +63,10 @@ agent_name() {
 cmd_check() {
   if [ -f "$stop_file_fleet" ]; then
     echo "STOPPED (fleet-wide): $(cat "$stop_file_fleet")" >&2
+    return 1
+  fi
+  if [ -f "$MAIN_REPO_DIR/.flywheel/STOP" ] && [ "$MAIN_REPO_DIR" != "$REPO_DIR" ]; then
+    echo "STOPPED ($(basename "$MAIN_REPO_DIR"), set in the main worktree): $(cat "$MAIN_REPO_DIR/.flywheel/STOP")" >&2
     return 1
   fi
   if [ -f "$stop_file_repo" ]; then
