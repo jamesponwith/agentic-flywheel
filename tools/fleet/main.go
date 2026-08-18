@@ -385,6 +385,27 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 	if err != nil {
 		return err
 	}
+	// Reconcile before allocating. A killed run leaves a worktree and branch
+	// behind, and `git worktree add -b bead/<id>` is fatal when the branch
+	// exists — so without this, one bad night removes those beads from the
+	// fleet's reach permanently (fw-lb8.9).
+	for _, repo := range r.Repos {
+		if repo.Paused {
+			continue
+		}
+		left, err := Reconcile(repo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: reconcile %s: %v\n", repo.Name, err)
+			continue
+		}
+		for _, l := range left {
+			fmt.Printf("  reconciled %-22s %-18s %s — %s\n", l.Repo, l.Branch, l.Action, l.Detail)
+		}
+		if msg := ReleaseStaleSlots(repo); msg != "" {
+			fmt.Println("  " + msg)
+		}
+	}
+
 	OnlyBead = onlyBead
 	defer func() { OnlyBead = "" }()
 	plan, err := AllocateWithLoad(r, func(p string) bdClient {

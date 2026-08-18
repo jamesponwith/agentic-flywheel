@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -220,5 +221,44 @@ func TestManifestMarksTheArtifactsThatBitUs(t *testing.T) {
 		if want[a.Path] && !a.NeedsAdaptation {
 			t.Errorf("%s is copyable per the manifest, but it is not portable between languages", a.Path)
 		}
+	}
+}
+
+// doctor used os.Stat, which answers "a filename existed on this filesystem at
+// this instant" — not "a clone would get this". Three repos reported complete
+// on artifacts that were never committed, including drift.yml, the check meant
+// to catch exactly that class of drift.
+func TestPresentRequiresGitToTrackIt(t *testing.T) {
+	dir := t.TempDir()
+	for _, a := range [][]string{{"init", "-q", "-b", "main"},
+		{"config", "user.email", "d@d"}, {"config", "user.name", "d"}} {
+		c := exec.Command("git", a...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tracked.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "untracked.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range [][]string{{"add", "tracked.md"}, {"commit", "-qm", "add"}} {
+		c := exec.Command("git", a...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+
+	if !present(dir, "tracked.md") {
+		t.Error("a tracked file was reported missing")
+	}
+	if present(dir, "untracked.md") {
+		t.Error("an untracked file was reported present — this is the bug that made three repos claim parity they did not have")
+	}
+	if present(dir, "absent.md") {
+		t.Error("a file that does not exist was reported present")
 	}
 }
