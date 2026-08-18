@@ -34,12 +34,15 @@ func (m mergeSlot) ensure() {
 func (m mergeSlot) acquire(within time.Duration, now func() time.Time) (bool, string) {
 	deadline := now().Add(within)
 	for {
-		out, err := m.bd.run(m.bd.dir, "merge-slot", "acquire")
+		// bd writes "slot held by …" to STDERR, so a stdout-only read never saw
+		// it: the guard below was dead and any bd failure spun the full
+		// deadline. Exit status is the real signal.
+		out, err := m.bd.combined(m.bd.dir, "merge-slot", "acquire")
 		if err == nil && !strings.Contains(strings.ToLower(string(out)), "held") {
 			return true, ""
 		}
 		if now().After(deadline) {
-			return false, fmt.Sprintf("merge slot busy for %s; branch pushed by nobody — rerun or merge by hand", within)
+			return false, fmt.Sprintf("merge slot busy for %s — do not push; rerun this bead or merge by hand", within)
 		}
 		time.Sleep(2 * time.Second)
 	}
