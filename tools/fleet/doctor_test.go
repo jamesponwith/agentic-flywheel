@@ -16,6 +16,12 @@ func repoWith(t *testing.T, paths ...string) Repo {
 			if err := os.MkdirAll(full, 0o755); err != nil {
 				t.Fatal(err)
 			}
+			// git cannot track an empty directory, and a real docs/adr or
+			// .beads always has files in it. An empty one would correctly
+			// read as missing.
+			if err := os.WriteFile(filepath.Join(full, "content.md"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -24,6 +30,17 @@ func repoWith(t *testing.T, paths ...string) Repo {
 		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// present() now requires git to track the path, because "a clone would get
+	// this" is the question doctor is meant to answer. The fixture therefore
+	// has to be a real repo with the artifacts committed — a bare temp dir
+	// models a situation that never occurs in the roster.
+	for _, a := range [][]string{{"init", "-q", "-b", "main"},
+		{"config", "user.email", "d@d"}, {"config", "user.name", "d"},
+		{"add", "-A"}, {"commit", "-qm", "fixture"}} {
+		c := exec.Command("git", a...)
+		c.Dir = dir
+		_ = c.Run() // an empty fixture has nothing to commit; that is fine
 	}
 	return Repo{Name: "r", Path: dir, Lang: "go"}
 }
