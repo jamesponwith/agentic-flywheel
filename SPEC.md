@@ -9,7 +9,9 @@ a public, working instance of agent-driven development with real quality gates a
 loops. It also compounds — every future personal project (starting with the LLM resiliency router)
 gets built inside it, so the flywheel produces evidence continuously.
 
-## The five stages, personal edition
+## The stages, personal edition
+
+*(Five at v1; Operate became a sixth in ADR 0002 — see Chapter 2.)*
 
 Mapping from the C1 version. (The Build stage at C1 that you were blanking on: it's the **inner
 loop** — the agent/dev turning intent artifacts into code under fixed conventions, with fast local
@@ -117,7 +119,9 @@ flywheel-template/
 ## Success criteria
 
 - The router is built entirely inside the flywheel — every merged PR passed the full Validate gate.
-- One month of real DORA data on a public dashboard.
+- One month of real DORA data on a public dashboard. *(Not met: nine days, and
+  the change-failure rate was wrong for most of them — see ADR 0003's warning
+  about pointing Operate at an unreachable target, which this project then did.)*
 - ✅ Starting project #3 (brax-tennis-rl) from the template takes < 30 minutes.
   (Measured 2026-08-11: **2m55s** from `gh repo create --template flywheel-template-py` to
   smoke PR merged through a green gate — real SPEC in place, uv/ruff/pytest hooks live,
@@ -127,7 +131,7 @@ flywheel-template/
 
 # Chapter 2 — v2 scope (opened 2026-08-15)
 
-V1 answered "does the C1 flywheel survive at a team of one?" — yes, five stages, three instances,
+V1 answered "does the C1 flywheel survive at a team of one?" — yes, five stages (six after ADR 0002), three instances,
 one released binary. V2 answers the two questions v1 left open:
 
 1. **The cycle stops too early.** The flywheel ends at "binary on a host". Nothing observes the
