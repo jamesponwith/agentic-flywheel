@@ -11,8 +11,10 @@ func TestRunnerArgv(t *testing.T) {
 		runner Runner
 		want   string
 	}{
-		{"default is claude, but as a default not an assumption",
-			Runner{}, "-p /flywheel-next x-1"},
+		// The default now asks for JSON, because that is what carries
+		// total_cost_usd — without it every run is unmeasured (retro 2026-08).
+		{"default is claude, and asks for a cost report",
+			Runner{}, "-p /flywheel-next x-1 --output-format json"},
 		{"a different agent is a config edit, not a code change",
 			Runner{Cmd: "opencode", Args: []string{"run", "{prompt}"}}, "run /flywheel-next x-1"},
 		{"prompt can be embedded mid-argument",
