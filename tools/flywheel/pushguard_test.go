@@ -6,7 +6,9 @@
 package flywheel
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,10 +18,26 @@ func pushLine(remoteRef string) string {
 	return "refs/heads/x deadbeef " + remoteRef + " 0000000000000000000000000000000000000000\n"
 }
 
-func runPushGuard(t *testing.T, stdin string, env ...string) (string, int) {
+// runPushGuardIn drives the guard inside dir, which must be a git repository
+// the test created.
+//
+// The directory is chosen, never inherited, for two reasons the suite got
+// wrong. A linked worktree is one of the guard's two agent signals, so a test
+// that ran wherever it happened to live passed in the main checkout and failed
+// in every builder worktree — a gate red for every agent, and only for agents
+// (fw-4zb). And a real refusal appends to $REPO/.flywheel/agent-log.jsonl, so
+// the same runs were writing push.refused records into the repo's own audit
+// log: fabricated evidence of refusals that never happened, in a system whose
+// argument is that refusals are evidence.
+func runPushGuardIn(t *testing.T, dir, stdin string, env ...string) (string, int) {
 	t.Helper()
-	c := exec.Command("bash", "./push-guard.sh")
-	c.Env = append(hermeticEnv(), env...)
+	script, err := filepath.Abs("push-guard.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("bash", script)
+	c.Dir = dir
+	c.Env = append(append(hermeticEnv(), "FLYWHEEL_HOME="+filepath.Join(dir, "home")), env...)
 	c.Stdin = strings.NewReader(stdin)
 	out, err := c.CombinedOutput()
 	code := 0
@@ -29,6 +47,11 @@ func runPushGuard(t *testing.T, stdin string, env ...string) (string, int) {
 		t.Fatalf("running push-guard.sh: %v\n%s", err, out)
 	}
 	return string(out), code
+}
+
+func runPushGuard(t *testing.T, stdin string, env ...string) (string, int) {
+	t.Helper()
+	return runPushGuardIn(t, scratch(t), stdin, env...)
 }
 
 func TestPushGuardStopsAgents(t *testing.T) {
@@ -67,13 +90,34 @@ func TestPushGuardIsNotFooledByTheCallersDirectory(t *testing.T) {
 	// git answers --git-dir absolutely and --git-common-dir relatively when the
 	// caller sits in a subdirectory. Comparing the two as strings reported the
 	// main repository as a linked worktree, so the guard refused the maintainer
-	// every push not made from the root. Run from a subdirectory on purpose.
-	c := exec.Command("bash", "../flywheel/push-guard.sh")
-	c.Dir = "../fleet"
-	c.Env = hermeticEnv()
-	c.Stdin = strings.NewReader(pushLine("refs/heads/main"))
-	if out, err := c.CombinedOutput(); err != nil {
-		t.Errorf("blocked a human pushing from a subdirectory: %v\n%s", err, out)
+	// every push not made from the root. Run from a subdirectory on purpose —
+	// of a repo the test made, so "is this a worktree" has one right answer.
+	sub := filepath.Join(scratch(t), "pkg", "nested")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runPushGuardIn(t, sub, pushLine("refs/heads/main"))
+	if code != 0 {
+		t.Errorf("blocked a human pushing from a subdirectory\n%s", out)
+	}
+}
+
+func TestPushGuardLogsRefusalsWhereItWasPointed(t *testing.T) {
+	// A refusal is evidence and must be recorded — into the repo the guard was
+	// actually run against. Before fw-4zb the suite recorded them into THIS
+	// repo's audit log, which is worse than not recording at all: it is
+	// evidence of a refusal that never happened.
+	dir := scratch(t)
+	if _, code := runPushGuardIn(t, dir, pushLine("refs/heads/main"),
+		"FLYWHEEL_AGENT=fleet/builder-go"); code == 0 {
+		t.Fatal("allowed an agent to push main")
+	}
+	lines := readLines(t, filepath.Join(dir, ".flywheel", "agent-log.jsonl"))
+	if len(lines) != 1 || !strings.Contains(lines[0], "push.refused") {
+		t.Fatalf("refusal not recorded in the scratch repo: %q", lines)
+	}
+	if !strings.Contains(lines[0], `"refs":"main"`) {
+		t.Errorf("record does not name the refused ref: %s", lines[0])
 	}
 }
 
