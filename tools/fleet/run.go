@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,9 @@ type Builder struct {
 	Took     time.Duration `json:"took"`
 	Outcome  string        `json:"outcome"` // green | no-op | abandoned | timeout | error | skipped
 	Commits  int           `json:"commits"` // evidence: green requires > 0
+	USD      float64       `json:"usd"`     // 0 with Measured false means unmeasured, not free
+	Tokens   int           `json:"tokens"`
+	Turns    int           `json:"turns"`
 	Detail   string        `json:"detail"`
 }
 
@@ -179,7 +183,10 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		}
 	}
 	cmd.Dir = wt
-	cmd.Stdout = logFile
+	// Tee: the log file stays the human artifact, and the buffer lets us read
+	// the runner's cost report out of the same stream.
+	var captured strings.Builder
+	cmd.Stdout = io.MultiWriter(logFile, &captured)
 	cmd.Stderr = logFile
 	// Scrub any inherited FLYWHEEL_AGENT before setting this builder's own.
 	// The last run reported its audit entries under a name inherited from the
@@ -254,6 +261,14 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	//
 	// The push happens in the agent, so the agent holds the slot:
 	// /flywheel-next step 7 acquires before pushing and releases after.
+
+	// Record what it cost, from the runner's own report — never an estimate.
+	// A runner that reports nothing leaves the run unmeasured, which cost.go
+	// renders as "unmeasured" rather than as free.
+	if rep, ok := parseRunReport([]byte(captured.String())); ok {
+		b.USD, b.Tokens, b.Turns = rep.TotalCostUSD, rep.tokens(), rep.NumTurns
+		_ = logSpend(repo.Path, a, rep)
+	}
 
 	b.Commits = commits
 
