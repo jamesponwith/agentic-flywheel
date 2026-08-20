@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +68,35 @@ func TestCommittedRosterHasNoHostPaths(t *testing.T) {
 	}
 	if strings.Contains(string(b), "/home/") || strings.Contains(string(b), "/Users/") {
 		t.Errorf("committed roster contains an absolute host path:\n%s", b)
+	}
+}
+
+func TestCommittedRosterStillReportsItsCost(t *testing.T) {
+	// resolved() REPLACES the default args when the roster supplies its own,
+	// so a roster runner is free to drop the flag that carries total_cost_usd.
+	// It did: the cost wiring landed in the Go default and the roster kept the
+	// older argv, which would have run the whole first night UNMEASURED with
+	// nothing failing. The instrument ADR 0001's cost test depends on cannot
+	// be disabled by a config file nobody re-reads.
+	b, err := os.ReadFile("../../.flywheel/roster.json")
+	if err != nil {
+		t.Skip("roster not present")
+	}
+	var r Roster
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Runner.Cmd == "" {
+		return // no override; the default already carries the flag
+	}
+	argv := strings.Join(r.Runner.argv("x"), " ")
+	for _, want := range DefaultRunner().Args {
+		if strings.Contains(want, "{prompt}") || strings.Contains(argv, want) {
+			continue
+		}
+		t.Errorf("roster runner drops %q from the default argv, so runs report no spend.\n"+
+			"argv = %q\nIf the swapped-in agent reports cost another way, teach parseRunReport that shape "+
+			"and update this test — do not just delete the flag.", want, argv)
 	}
 }
 
