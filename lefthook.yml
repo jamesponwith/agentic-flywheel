@@ -41,3 +41,24 @@ pre-commit:
 # afternoon by the person who wrote the rule. Review now runs inside
 # /flywheel-next, where the cost lands on an agent session rather than on
 # someone waiting at a terminal. `/flywheel-review` remains available on demand.
+
+# The only pre-push rule: refuse what ADR 0003 forbids an unattended agent.
+# It costs milliseconds and is scoped to agents, so it does not become the
+# eight-minute hook above that got bypassed six times in an afternoon.
+# The only pre-push rule: refuse what ADR 0003 forbids an unattended agent.
+# It costs milliseconds and is scoped to agents, so it does not become the
+# eight-minute hook above that got bypassed six times in an afternoon.
+#
+# A script, not a command. lefthook filters `commands` by the files being
+# pushed and skips those with none — sensible for a linter, wrong for a rule
+# that must judge the REFS whatever the diff contains. As a command it printed
+# "(skip) no matching push files" and let a builder push straight to main.
+# `skip_empty: false` does not fix it: lefthook 1.13.6 drops the key silently,
+# which `lefthook dump` will show you and the run will not.
+pre-push:
+  scripts:
+    "push-guard.sh":
+      # git passes the refs on stdin; without this the read loop sees none and
+      # the guard exits 0 on everything.
+      use_stdin: true
+      runner: bash
