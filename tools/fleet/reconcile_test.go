@@ -2,27 +2,26 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// inDir, never a bare exec.Command: the pre-commit hook runs the suite with
+// GIT_DIR and GIT_INDEX_FILE already set, and a bare git inherits them and
+// operates on the real repository instead of the scratch one — which is what
+// hermeticEnv exists to stop (gitenv.go). Built with a bare exec.Command, these
+// helpers failed every time the gate ran them and passed every time a human
+// ran them by hand.
 func reconcileRepo(t *testing.T) Repo {
 	t.Helper()
 	dir := t.TempDir()
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
-		{"config", "user.email", "r@r"}, {"config", "user.name", "r"}} {
-		c := exec.Command("git", a...)
-		c.Dir = dir
-		if out, err := c.CombinedOutput(); err != nil {
+		{"config", "user.email", "r@r"}, {"config", "user.name", "r"},
+		{"commit", "-q", "--allow-empty", "-m", "root"}} {
+		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
-	}
-	c := exec.Command("git", "commit", "-q", "--allow-empty", "-m", "root")
-	c.Dir = dir
-	if out, err := c.CombinedOutput(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
 	}
 	return Repo{Name: "r", Path: dir}
 }
@@ -34,9 +33,7 @@ func addWorktree(t *testing.T, repo Repo, bead string, commits int) string {
 		t.Fatal(err)
 	}
 	for i := 0; i < commits; i++ {
-		c := exec.Command("git", "commit", "-q", "--allow-empty", "-m", "work")
-		c.Dir = wt
-		if out, err := c.CombinedOutput(); err != nil {
+		if out, err := inDir(wt, "git", "commit", "-q", "--allow-empty", "-m", "work").CombinedOutput(); err != nil {
 			t.Fatalf("%v\n%s", err, out)
 		}
 	}
