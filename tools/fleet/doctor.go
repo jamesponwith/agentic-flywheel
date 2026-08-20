@@ -72,6 +72,11 @@ type Diagnosis struct {
 	Repo    string    `json:"repo"`
 	Missing []Finding `json:"missing"`
 	Present int       `json:"present"`
+	// Probes are the artifacts that exist and were asked to do their job.
+	// "Present" was already hardened once, from "a filename exists" to "git
+	// tracks it"; this is the next rung, and the only one that can catch a
+	// guard disabled by a config key nobody validates (fw-ybs).
+	Probes []Probe `json:"probes,omitempty"`
 }
 
 type Finding struct {
@@ -83,7 +88,10 @@ type Finding struct {
 	Manual bool `json:"manual,omitempty"`
 }
 
-// Diagnose reports what a repo is missing. It never modifies anything.
+// Diagnose reports what a repo is missing, and what is present but not working.
+// It writes nothing to the repo itself, but it does run the pre-push hook to
+// ask it for a verdict — the only way to tell an installed guard from an
+// installed-looking one. See guardprobe.go.
 func Diagnose(repo Repo) Diagnosis {
 	d := Diagnosis{Repo: repo.Name}
 	for _, a := range Manifest {
@@ -108,6 +116,7 @@ func Diagnose(repo Repo) Diagnosis {
 		}
 		return d.Missing[i].Path < d.Missing[j].Path
 	})
+	d.Probes = probes(repo)
 	return d
 }
 
@@ -207,24 +216,51 @@ func (r Repo) skips(stage string) bool {
 	return false
 }
 
-func (d Diagnosis) String() string {
-	if len(d.Missing) == 0 {
-		return fmt.Sprintf("  %-22s complete (%d artifacts)", d.Repo, d.Present)
-	}
-	var b strings.Builder
-	req := 0
-	for _, m := range d.Missing {
-		if m.Required {
-			req++
+// Failing returns the probes that did not get the verdict they wanted.
+func (d Diagnosis) Failing() []Probe {
+	var out []Probe
+	for _, p := range d.Probes {
+		if !p.OK {
+			out = append(out, p)
 		}
 	}
-	fmt.Fprintf(&b, "  %-22s %d present, %d missing (%d required)\n", d.Repo, d.Present, len(d.Missing), req)
+	return out
+}
+
+// String is read by drift.yml, which treats the literal "complete (" as parity
+// and files nothing when it sees it. A failing probe must therefore keep that
+// token off the line: a checklist that says complete over a red check is the
+// exact failure the probe was added to end.
+func (d Diagnosis) String() string {
+	failing := d.Failing()
+	var b strings.Builder
+	switch {
+	case len(d.Missing) == 0 && len(failing) == 0:
+		fmt.Fprintf(&b, "  %-22s complete (%d artifacts)\n", d.Repo, d.Present)
+	case len(d.Missing) == 0:
+		fmt.Fprintf(&b, "  %-22s %d present, %d not working\n", d.Repo, d.Present, len(failing))
+	default:
+		req := 0
+		for _, m := range d.Missing {
+			if m.Required {
+				req++
+			}
+		}
+		fmt.Fprintf(&b, "  %-22s %d present, %d missing (%d required)", d.Repo, d.Present, len(d.Missing), req)
+		if len(failing) > 0 {
+			fmt.Fprintf(&b, ", %d not working", len(failing))
+		}
+		b.WriteString("\n")
+	}
 	for _, m := range d.Missing {
 		mark := " "
 		if m.Required {
 			mark = "!"
 		}
 		fmt.Fprintf(&b, "    %s %-38s %-9s %s\n", mark, m.Path, m.Stage, m.Why)
+	}
+	for _, p := range failing {
+		fmt.Fprintf(&b, "    x %-38s %-9s %s\n", p.Name, "agents", p.Why)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

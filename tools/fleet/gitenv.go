@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"slices"
@@ -50,7 +51,14 @@ func hermeticEnv() []string {
 // inDir builds a subprocess that acts on dir and nowhere else. Use it for git,
 // and for anything that is a git client underneath — bd keeps its issues in one.
 func inDir(dir, name string, args ...string) *exec.Cmd {
-	c := exec.Command(name, args...)
+	return inDirContext(context.Background(), dir, name, args...)
+}
+
+// inDirContext is inDir with a deadline. Our own subprocesses return; a repo's
+// git hook is somebody else's code and might not, and a doctor that hangs on
+// one repo never reaches the rest of the roster.
+func inDirContext(ctx context.Context, dir, name string, args ...string) *exec.Cmd {
+	c := exec.CommandContext(ctx, name, args...)
 	c.Dir = dir
 	c.Env = hermeticEnv()
 	return c
