@@ -60,14 +60,6 @@
   ],
   "agents": [
     {
-      "name": "fleet/coordinator",
-      "role": "coordinator",
-      "repos": [
-        "*"
-      ],
-      "skills": []
-    },
-    {
       "name": "fleet/builder-go",
       "role": "builder",
       "repos": [
@@ -91,46 +83,7 @@
         "jax",
         "rl"
       ]
-    },
-    {
-      "name": "fleet/reviewer-correctness",
-      "role": "reviewer",
-      "repos": [
-        "*"
-      ],
-      "skills": []
-    },
-    {
-      "name": "fleet/reviewer-security",
-      "role": "reviewer",
-      "repos": [
-        "*"
-      ],
-      "skills": []
-    },
-    {
-      "name": "fleet/reviewer-ponytail",
-      "role": "reviewer",
-      "repos": [
-        "*"
-      ],
-      "skills": []
-    },
-    {
-      "name": "fleet/operator",
-      "role": "operator",
-      "repos": [
-        "llm-resiliency-router"
-      ],
-      "skills": []
-    },
-    {
-      "name": "fleet/retro",
-      "role": "retro",
-      "repos": [
-        "*"
-      ],
-      "skills": []
     }
-  ]
+  ],
+  "_agents_note": "Cut from 8 agents across 5 roles to 2 builders (retro 2026-08). Roster.Match had exactly one call site and only ever matched role=builder; coordinator, reviewer, operator and retro were declared and never dispatched. ADR 0001: a mechanism with zero call sites cannot improve by next month."
 }
