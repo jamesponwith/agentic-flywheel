@@ -13,7 +13,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -38,39 +40,77 @@ func (r runReport) tokens() int {
 		r.Usage.CacheReadInput + r.Usage.CacheCreationInput
 }
 
-// parseRunReport pulls the runner's report out of its output. It returns ok=false
-// rather than a zero report when there is nothing to parse — a runner that does
-// not report cost leaves the run UNMEASURED, which cost.go already renders
-// honestly. Guessing here would defeat the whole distinction.
+// parseRunReport pulls the runner's report out of its output: the last complete
+// JSON object in the stream that carries a cost. Anything before it is the
+// agent's prose.
+//
+// Decoding is what identifies the report — never where its keys happen to sit.
+// An earlier version anchored on the literal `{"is_error"`, which silently
+// required is_error to be the object's FIRST key: the same report with `type`
+// first, or pretty-printed, parsed as nothing and left every run unmeasured.
+// No producer orders the keys of a JSON object, and runner.go exists precisely
+// so the runner can be swapped for one that reports differently.
+//
+// It returns ok=false rather than a zero report when there is nothing to parse —
+// a runner that does not report cost leaves the run UNMEASURED, which cost.go
+// already renders honestly. Guessing here would defeat the whole distinction.
 func parseRunReport(out []byte) (runReport, bool) {
-	s := strings.TrimSpace(string(out))
-	// The report is the last JSON object in the stream; anything before it is
-	// the agent's prose.
-	i := strings.LastIndex(s, "{\"is_error\"")
-	if i < 0 {
-		i = strings.LastIndex(s, "{")
+	// Backwards, so the *last* report wins and the scan stops as soon as it
+	// finds one. Nested objects sit at higher offsets than the object that
+	// contains them, so they are tried and rejected first for carrying no cost.
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i] != '{' {
+			continue
+		}
+		var r runReport
+		// Decode, not Unmarshal: Decode reads one value and ignores whatever
+		// trails it, so a report followed by a stray brace still parses.
+		if err := json.NewDecoder(bytes.NewReader(out[i:])).Decode(&r); err != nil {
+			continue
+		}
+		if r.TotalCostUSD == 0 && r.tokens() == 0 {
+			continue // parsed something, but it carried no cost
+		}
+		return r, true
 	}
-	if i < 0 {
-		return runReport{}, false
+	return runReport{}, false
+}
+
+// withAgent replaces FLYWHEEL_AGENT in env, so attribution comes from the
+// assignment and never from whatever the environment happened to carry.
+func withAgent(env []string, name string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "FLYWHEEL_AGENT=") {
+			out = append(out, kv)
+		}
 	}
-	var r runReport
-	if err := json.Unmarshal([]byte(s[i:]), &r); err != nil {
-		return runReport{}, false
-	}
-	if r.TotalCostUSD == 0 && r.tokens() == 0 {
-		return runReport{}, false // parsed something, but it carried no cost
-	}
-	return r, true
+	return append(out, "FLYWHEEL_AGENT="+name)
 }
 
 // logSpend appends the run's cost to the repo's audit log through guard.sh, so
 // it lands in the same append-only ledger `fleet cost` already reads.
+//
+// The agent goes in the environment, never in a k=v pair. guard.sh writes
+// "agent" for itself and refuses a caller-supplied duplicate outright — exit 2,
+// nothing written, not even a partial record — so passing `agent=` here
+// recorded no cost at all while looking like it worked.
+//
+// Scrubbed before it is set, for the reason build() gives: hermeticEnv
+// preserves an inherited FLYWHEEL_AGENT, and a cost line attributed to the
+// coordinator's shell rather than to the assignment is exactly the attribution
+// bug the ADR 0003 log exists to prevent.
 func logSpend(repoPath string, a Assignment, r runReport) error {
-	return inDir(repoPath, "tools/flywheel/guard.sh", "log", "bead.cost",
+	cmd := inDir(repoPath, "tools/flywheel/guard.sh", "log", "bead.cost",
 		"bead="+a.Bead,
-		"agent="+a.Agent,
 		"usd="+strconv.FormatFloat(r.TotalCostUSD, 'f', 4, 64),
 		"tokens="+strconv.Itoa(r.tokens()),
 		"turns="+strconv.Itoa(r.NumTurns),
-	).Run()
+	)
+	cmd.Env = withAgent(cmd.Env, a.Agent)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("recording spend for %s: %w: %s", a.Bead, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
