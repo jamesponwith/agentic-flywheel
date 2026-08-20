@@ -17,7 +17,14 @@ type Runner struct {
 // DefaultRunner is Claude Code, because that is what is installed here — but
 // it is a default, not an assumption baked into the call site.
 func DefaultRunner() Runner {
-	return Runner{Cmd: "claude", Args: []string{"-p", "{prompt}"}, Stdin: "none"}
+	// --output-format json makes the runner report total_cost_usd and its token
+	// usage, which is what turns `fleet cost` from an instrument that measures
+	// nothing into one the ADR 0001 cost test can actually use.
+	return Runner{
+		Cmd:   "claude",
+		Args:  []string{"-p", "{prompt}", "--output-format", "json"},
+		Stdin: "none",
+	}
 }
 
 // resolved returns the runner with env overrides applied and defaults filled.

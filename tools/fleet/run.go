@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +32,15 @@ type Builder struct {
 	Took     time.Duration `json:"took"`
 	Outcome  string        `json:"outcome"` // green | no-op | abandoned | timeout | error | skipped
 	Commits  int           `json:"commits"` // evidence: green requires > 0
-	Detail   string        `json:"detail"`
+	USD      float64       `json:"usd"`
+	Tokens   int           `json:"tokens"`
+	Turns    int           `json:"turns"`
+	// Measured is false when the cost never reached the ledger — either the
+	// runner reported none, or recording it failed. Zero spend and UNMEASURED
+	// spend mean opposite things (cost.go), and Builder carried no way to tell
+	// them apart.
+	Measured bool   `json:"measured"`
+	Detail   string `json:"detail"`
 }
 
 // RunOpts bounds a night. Every field here exists because something without it
@@ -179,7 +188,10 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		}
 	}
 	cmd.Dir = wt
-	cmd.Stdout = logFile
+	// Tee: the log file stays the human artifact, and the buffer lets us read
+	// the runner's cost report out of the same stream.
+	var captured strings.Builder
+	cmd.Stdout = io.MultiWriter(logFile, &captured)
 	cmd.Stderr = logFile
 	// Scrub any inherited FLYWHEEL_AGENT before setting this builder's own.
 	// The last run reported its audit entries under a name inherited from the
@@ -188,17 +200,11 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// happened to carry.
 	// hermeticEnv, not os.Environ: a builder that inherited GIT_DIR would edit
 	// the spawner's repository from inside its own worktree.
-	env := hermeticEnv()
-	clean := env[:0]
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, "FLYWHEEL_AGENT=") {
-			clean = append(clean, kv)
-		}
-	}
+
 	// Hand the builder the canonical project_key rather than letting it derive
 	// one. A builder resolving its own path can disagree with the coordinator
 	// under a symlink, and two agents on different keys never conflict.
-	cmd.Env = append(clean, "FLYWHEEL_AGENT="+a.Agent, "FLYWHEEL_PROJECT_KEY="+repo.Path)
+	cmd.Env = append(withAgent(hermeticEnv(), a.Agent), "FLYWHEEL_PROJECT_KEY="+repo.Path)
 
 	// Poll the kill switch while the builder runs. Without this the switch only
 	// gated ALLOCATION: a human pulling it at 2am would watch every in-flight
@@ -254,6 +260,22 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	//
 	// The push happens in the agent, so the agent holds the slot:
 	// /flywheel-next step 7 acquires before pushing and releases after.
+
+	// Record what it cost, from the runner's own report — never an estimate.
+	// A runner that reports nothing leaves the run unmeasured, which cost.go
+	// renders as "unmeasured" rather than as free.
+	if rep, ok := parseRunReport([]byte(captured.String())); ok {
+		b.USD, b.Tokens, b.Turns = rep.TotalCostUSD, rep.tokens(), rep.NumTurns
+		// Never swallowed. A cost that did not reach the ledger is not a
+		// measurement — `fleet cost` reads the ledger, so reporting Measured
+		// here while the ledger stayed empty is the split cost.go was written
+		// to prevent. That is how this recording no-opped silently once.
+		if err := logSpend(repo.Path, a, rep); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", err)
+		} else {
+			b.Measured = true
+		}
+	}
 
 	b.Commits = commits
 
