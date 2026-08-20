@@ -6,7 +6,9 @@
 package flywheel
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,9 +18,71 @@ func pushLine(remoteRef string) string {
 	return "refs/heads/x deadbeef " + remoteRef + " 0000000000000000000000000000000000000000\n"
 }
 
+// guardPath resolves push-guard.sh absolutely, so it can be run from a
+// directory that is not this one.
+func pushGuardPath(t *testing.T) string {
+	t.Helper()
+	p, err := filepath.Abs("push-guard.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// notAWorktree is an ordinary git repo: no FLYWHEEL_AGENT and no linked
+// worktree, which together are what the guard reads as "a human at a terminal".
+//
+// The tests used to run the guard in whatever directory they happened to sit
+// in. Under a builder that is a LINKED WORKTREE, the guard's structural signal
+// fires, and the two tests asserting the human case failed — passing for a
+// human in the main checkout and failing for every agent, which is how they
+// landed green and then blocked the pre-commit gate for the whole fleet
+// (fw-pdi). A test that asserts an environment has to build it (fw-u6g).
+func notAWorktree(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	c := exec.Command("git", "-C", dir, "init", "-q")
+	c.Env = hermeticEnv()
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	return dir
+}
+
+// aWorktree is a linked worktree of a scratch repo — the other half of the
+// signal, built rather than inherited for the same reason.
+func aWorktree(t *testing.T) string {
+	t.Helper()
+	main := notAWorktree(t)
+	for _, a := range [][]string{
+		{"-C", main, "config", "user.email", "d@d"},
+		{"-C", main, "config", "user.name", "d"},
+		{"-C", main, "commit", "-q", "--allow-empty", "-m", "seed"},
+	} {
+		c := exec.Command("git", a...)
+		c.Env = hermeticEnv()
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	linked := filepath.Join(t.TempDir(), "wt")
+	c := exec.Command("git", "-C", main, "worktree", "add", "-q", "-b", "bead/x", linked)
+	c.Env = hermeticEnv()
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+	return linked
+}
+
 func runPushGuard(t *testing.T, stdin string, env ...string) (string, int) {
 	t.Helper()
-	c := exec.Command("bash", "./push-guard.sh")
+	return runPushGuardIn(t, notAWorktree(t), stdin, env...)
+}
+
+func runPushGuardIn(t *testing.T, dir, stdin string, env ...string) (string, int) {
+	t.Helper()
+	c := exec.Command("bash", pushGuardPath(t))
+	c.Dir = dir
 	c.Env = append(hermeticEnv(), env...)
 	c.Stdin = strings.NewReader(stdin)
 	out, err := c.CombinedOutput()
@@ -68,12 +132,26 @@ func TestPushGuardIsNotFooledByTheCallersDirectory(t *testing.T) {
 	// caller sits in a subdirectory. Comparing the two as strings reported the
 	// main repository as a linked worktree, so the guard refused the maintainer
 	// every push not made from the root. Run from a subdirectory on purpose.
-	c := exec.Command("bash", "../flywheel/push-guard.sh")
-	c.Dir = "../fleet"
-	c.Env = hermeticEnv()
-	c.Stdin = strings.NewReader(pushLine("refs/heads/main"))
-	if out, err := c.CombinedOutput(); err != nil {
-		t.Errorf("blocked a human pushing from a subdirectory: %v\n%s", err, out)
+	sub := filepath.Join(notAWorktree(t), "tools", "fleet")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, code := runPushGuardIn(t, sub, pushLine("refs/heads/main"))
+	if code != 0 {
+		t.Errorf("blocked a human pushing from a subdirectory\n%s", out)
+	}
+}
+
+// The other half of the signal, and the half the two tests above used to be
+// accidentally exercising. A builder worktree is refused even with the
+// environment stripped — that is the point of reading it structurally.
+func TestPushGuardRefusesAWorktreeWithNoAgentSet(t *testing.T) {
+	out, code := runPushGuardIn(t, aWorktree(t), pushLine("refs/heads/main"))
+	if code == 0 {
+		t.Errorf("let a builder worktree push main with FLYWHEEL_AGENT unset\n%s", out)
+	}
+	if !strings.Contains(out, "worktree") {
+		t.Errorf("refusal does not name what it read: %s", out)
 	}
 }
 
