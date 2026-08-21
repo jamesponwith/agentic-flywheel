@@ -9,9 +9,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,18 +103,28 @@ func TestQuotaWindowDefaultsToTheSessionWindow(t *testing.T) {
 	}
 }
 
-func TestCommittedRosterRationsTheWindowNotTheMonth(t *testing.T) {
-	r, err := LoadRoster("../../.flywheel/roster.json")
+func TestCommittedRosterNamesNoDollarLimit(t *testing.T) {
+	// The account bills no marginal dollar and publishes no remaining balance,
+	// so any dollar figure presented as a limit is a guess wearing a unit. Two
+	// of them shipped before this test existed. What paces the fleet is the
+	// hold written from the account's own 429 — see quotahold.go.
+	b, err := os.ReadFile("../../.flywheel/roster.json")
 	if err != nil {
 		t.Skip("roster not present")
 	}
-	q := r.Caps.Quota
-	if q.BudgetUSDWindow <= 0 {
-		t.Fatal("roster declares no window budget, so nothing gates dispatch and " +
-			"the only backstop left is discovering the 429 one builder at a time")
+	for _, banned := range []string{"budget_usd_window", "budget_usd_month"} {
+		if strings.Contains(string(b), banned) {
+			t.Errorf("roster still declares %q. Dollars are a measurement here, not a "+
+				"limit; a number nobody can check against the account will be trusted "+
+				"as though somebody had.", banned)
+		}
 	}
-	if q.window() > 24*time.Hour {
-		t.Errorf("window is %s: long enough that one bad night pauses the fleet for "+
-			"days over a quota that reset the same evening", q.window())
+	var r Roster
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	if w := r.Caps.Quota.window(); w > 24*time.Hour {
+		t.Errorf("reporting window is %s; long enough to describe usage that has "+
+			"already been given back", w)
 	}
 }

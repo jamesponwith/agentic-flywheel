@@ -97,30 +97,22 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 		when string
 	}
 
-	// The budget was declared, computed and printed, and never consulted by the
-	// thing that spends the money: cost.go has said "these repos pause until
-	// the next window" since it shipped, and nothing paused.
+	// The account rations a period, not a budget, and publishes neither a
+	// remaining balance nor a way to query one — so there is nothing to pace
+	// against in advance. What it does publish is the moment the quota comes
+	// back, in the 429 itself. Follow that: run until it says stop, wait
+	// exactly as long as it asks, resume without anyone clicking anything.
 	//
-	// It gated the wrong thing in the wrong unit. A Max subscription bills no
-	// marginal dollar, so a per-repo dollars-per-month cap rationed something
-	// that does not exist, while the limit that actually stopped the fleet was
-	// an account-wide window that resets in hours. Gate on the window, and on
-	// the fleet rather than the repo — two builders under every per-repo limit
-	// still emptied one shared pool between them.
-	var (
-		windowSpent float64
-		windowFull  bool
-	)
-	if opts.Execute && r.Caps.Quota.BudgetUSDWindow > 0 {
-		since := time.Now().Add(-r.Caps.Quota.window())
-		if usd, measured, err := FleetWindowSpend(r, since); err == nil && measured {
-			windowSpent = usd
-			windowFull = usd >= r.Caps.Quota.BudgetUSDWindow
+	// The earlier gates guessed instead. Dollars per repo per month rationed
+	// something a subscription never charges; dollars per window had the right
+	// shape and still needed a number that maps to nothing the account states.
+	var held bool
+	var heldTo time.Time
+	var heldWhy string
+	if opts.Execute && len(plan.Assignments) > 0 {
+		if repo, ok := r.Repo(plan.Assignments[0].Repo); ok {
+			heldTo, heldWhy, held = heldUntil(repo.Path, time.Now())
 		}
-		// An error is deliberately not fatal: an unreadable ledger must not
-		// stop the fleet, only fail to pause it. Worth stating plainly — this
-		// gate can be blinded, so it is a budget, not a security boundary. The
-		// 429 halt below is the backstop that cannot be.
 	}
 
 	for i, a := range plan.Assignments {
@@ -148,11 +140,10 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 				out[i] = b
 				return
 			}
-			if windowFull {
+			if held {
 				b.Outcome = "skipped"
-				b.Detail = fmt.Sprintf("fleet used $%.2f of its $%.2f allowance for this %s window — "+
-					"not dispatched; the window resets, so this is a wait, not a failure",
-					windowSpent, r.Caps.Quota.BudgetUSDWindow, r.Caps.Quota.window())
+				b.Detail = fmt.Sprintf("account quota returns %s (in %s) — not dispatched; %s",
+					heldTo.Local().Format("15:04 MST"), time.Until(heldTo).Round(time.Minute), heldWhy)
 				out[i] = b
 				return
 			}
@@ -175,6 +166,15 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 					quota.hit, quota.when = true, res.Detail
 				}
 				quota.Unlock()
+				// Persist it. The process that learned about the wall is about
+				// to exit; the next scheduled run is a different one, and would
+				// otherwise pay a full builder startup to rediscover it.
+				if reset, err := noteRateLimit(repo.Path, res.Detail, time.Now()); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not record the quota hold: %v\n", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "quota exhausted; holding until %s\n",
+						reset.Local().Format(time.RFC1123))
+				}
 			}
 			out[i] = res
 		}(i, a)

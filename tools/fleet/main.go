@@ -515,16 +515,12 @@ func doCost(rosterPath, since string, asJSON bool) error {
 		all = append(all, sp)
 	}
 	if asJSON {
-		// One object per repo, shaped for docs/fleet.html. Budget travels with
-		// the spend so the page can say "over" without a second source.
-		type row struct {
-			Spend
-			BudgetUSDMonth int `json:"budget_usd_month"`
-		}
-		out := make([]row, 0, len(all))
-		for i, sp := range all {
-			out = append(out, row{Spend: sp, BudgetUSDMonth: r.Repos[i].BudgetUSDMonth})
-		}
+		// One object per repo, shaped for docs/fleet.html. No budget field: the
+		// page has nothing to compare against now that dollars are a
+		// measurement rather than a limit, and a column headed "budget" would
+		// invite one to be invented.
+		out := make([]Spend, 0, len(all))
+		out = append(out, all...)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
@@ -547,34 +543,26 @@ func doCost(rosterPath, since string, asJSON bool) error {
 		fmt.Println("\nNo repo recorded a cost. The runner does not yet report usd/tokens" +
 			" into the audit log, so this is unmeasured rather than zero (fw-e7e.2).")
 	}
-	// What actually gates dispatch: the account's window, fleet-wide.
-	if q := r.Caps.Quota; q.BudgetUSDWindow > 0 {
+	// Recent usage, reported and not rationed. There is no number to ration
+	// against: the account publishes no remaining balance, so this says what
+	// the fleet consumed lately and nothing about what it may consume next.
+	// What paces it is the hold written from the account's own 429.
+	if q := r.Caps.Quota; q.window() > 0 {
 		usd, ok, err := FleetWindowSpend(r, time.Now().Add(-q.window()))
 		if err != nil {
 			return err
 		}
-		switch {
-		case !ok:
-			fmt.Printf("\nwindow (%s): unmeasured — not the same as free, and not headroom\n", q.window())
-		case usd >= q.BudgetUSDWindow:
-			fmt.Printf("\nWINDOW FULL — $%.2f of $%.2f this %s. The fleet will not dispatch until it resets.\n",
-				usd, q.BudgetUSDWindow, q.window())
-		default:
-			fmt.Printf("\nwindow (%s): $%.2f of $%.2f used\n", q.window(), usd, q.BudgetUSDWindow)
+		if ok {
+			fmt.Printf("\nlast %s: $%.2f of API-equivalent value across the fleet\n", q.window(), usd)
+		} else {
+			fmt.Printf("\nlast %s: unmeasured — not the same as idle\n", q.window())
 		}
 	}
-	// Per-repo monthly budgets are attribution, NOT a gate — they say which
-	// repo is eating the account, and nothing pauses on them. This line used to
-	// read "these repos pause until the next window" while nothing paused,
-	// which is the class of claim this tool exists to stop making.
-	over, err := OverBudgetRepos(r, from)
-	if err != nil {
-		return err
-	}
-	if len(over) > 0 {
-		fmt.Printf("\nheaviest repos against their declared monthly share (attribution only, not a gate):\n")
-		for _, sp := range over {
-			fmt.Println(sp)
+	for _, repo := range r.Repos {
+		if until, why, held := heldUntil(repo.Path, time.Now()); held {
+			fmt.Printf("\nQUOTA HOLD until %s (in %s)\n  %s\n",
+				until.Local().Format(time.RFC1123), time.Until(until).Round(time.Minute), why)
+			break
 		}
 	}
 	return nil

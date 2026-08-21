@@ -68,10 +68,39 @@ run)
 
   echo
   echo "digest: $digest"
+
+  # The account states when its quota returns, and fleet run records that in
+  # .flywheel/quota-hold. Come back then, by itself. A run that ends on a rate
+  # limit and waits for someone to notice is an outage with extra steps, and
+  # the whole reason to schedule this in the first place was to not need a
+  # person at 2am.
+  #
+  # This can chain: a resumed run that hits the wall again schedules another.
+  # That is the intended behaviour and it is bounded three ways — each link
+  # waits hours for a real reset, the review-weight budget refuses to dispatch
+  # while PRs sit unreviewed (ADR 0009), and guard.sh stops everything.
+  # To break it by hand: systemctl --user stop 'flywheel-resume-*'.
+  hold=".flywheel/quota-hold"
+  if [ -f "$hold" ] && command -v systemd-run >/dev/null 2>&1; then
+    until_ts=$(head -1 "$hold")
+    if secs=$(( $(date -u -d "$until_ts" +%s 2>/dev/null || echo 0) - $(date -u +%s) )) \
+       && [ "$secs" -gt 0 ]; then
+      # +60s: waking exactly on the boundary races the reset and buys another
+      # 429, which would schedule another wakeup for the same instant.
+      systemd-run --user --on-active="$((secs + 60))s" \
+        --unit="flywheel-resume-$(date -u +%Y%m%dT%H%M%SZ)" \
+        "$PWD/tools/flywheel/nightly.sh" run >/dev/null 2>&1 &&
+        echo "quota hold until $until_ts — resuming automatically in $(( (secs + 60) / 60 ))m"
+    fi
+  fi
   ;;
 
 status)
   systemctl --user list-timers flywheel-nightly.timer --no-pager 2>/dev/null | sed -n 1,2p || echo "timer not installed"
+  if [ -f .flywheel/quota-hold ]; then
+    echo; echo "QUOTA HOLD until $(head -1 .flywheel/quota-hold) — $(tail -1 .flywheel/quota-hold)"
+    systemctl --user list-timers 'flywheel-resume-*' --no-pager 2>/dev/null | sed -n 2p
+  fi
   latest=$(ls -1t "$DIGEST_DIR"/*.md 2>/dev/null | head -1)
   if [ -n "$latest" ]; then echo; echo "latest digest: $latest"; tail -6 "$latest"; else echo "no digests yet"; fi
   ;;

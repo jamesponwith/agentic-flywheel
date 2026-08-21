@@ -17,24 +17,21 @@
     "review_weight_per_night": 8,
     "concurrent_builders": 1,
     "repos_per_night": 2,
-    "_quota": "What actually rations the fleet. The account is a Max subscription: it bills no marginal dollar, so the usd figures the runner reports are API-equivalent valuation, not money, and the limit that bites is a usage window that RESETS. budget_usd_window is what the fleet may take of one window, fleet-wide because the quota is account-wide \u2014 two builders under every per-repo limit still emptied one pool between them and locked the owner out until 6pm. It is set below what the window holds on purpose: the remainder is headroom for the person, who is not a background job and should not have to queue behind one.",
+    "_quota": "The account is a Max subscription. It bills no marginal dollar, so the usd the runner reports is API-equivalent valuation and a measurement only \u2014 there is deliberately no dollar limit anywhere in this file. The real limit is a usage window, and the account states no remaining balance, so nothing here can pace against it in advance. What it does state is the moment the quota returns, in the 429 itself; the fleet records that and waits exactly that long (quotahold.go). window_hours is only how far back 'recent usage' is reported.",
     "quota": {
-      "window_hours": 5,
-      "budget_usd_window": 20
+      "window_hours": 5
     }
   },
   "repos": [
     {
       "name": "llm-resiliency-router",
       "path": "llm-resiliency-router",
-      "lang": "go",
-      "budget_usd_month": 20
+      "lang": "go"
     },
     {
       "name": "agentic-flywheel",
       "path": "agentic-flywheel",
       "lang": "go",
-      "budget_usd_month": 15,
       "skip_stages": [
         "operate",
         "release"
@@ -44,7 +41,6 @@
       "name": "brax-tennis-rl",
       "path": "brax-tennis-rl",
       "lang": "python",
-      "budget_usd_month": 20,
       "skip_stages": [
         "operate"
       ]
@@ -53,7 +49,6 @@
       "name": "flywheel-template",
       "path": "flywheel-template",
       "lang": "go",
-      "budget_usd_month": 10,
       "paused": true,
       "role": "template"
     },
@@ -61,7 +56,6 @@
       "name": "flywheel-template-py",
       "path": "flywheel-template-py",
       "lang": "python",
-      "budget_usd_month": 10,
       "paused": true,
       "role": "template"
     }

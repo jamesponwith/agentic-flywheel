@@ -73,25 +73,22 @@ type Caps struct {
 }
 
 // Quota is the account's usage limit, which on a subscription is a period, not
-// a bill.
+// a bill — and one the account never states as a number.
 //
-// The first version of this gate got the unit and the shape both wrong. It
-// capped dollars per repo per month, and a Max subscription charges no
-// marginal dollar — total_cost_usd is API-equivalent valuation, not money —
-// while the limit that actually stopped the fleet was an ACCOUNT session
-// window that resets in hours. So the gate paused one repo for a month over a
-// quota that had already reset, and could not see the two builders draining
-// one shared pool at once, which was the real failure.
+// Two earlier versions guessed at it and both were wrong. Dollars per repo per
+// month rationed something a subscription never charges, and paused a repo for
+// a month over a quota that had already reset. Dollars per window had the right
+// shape and still required a number that maps to nothing the account publishes
+// — there is no command that reports remaining quota, so any figure here is a
+// guess wearing a unit.
+//
+// WindowHours is therefore a reporting period, not a limit: it says how far
+// back "recent usage" looks. What actually paces the fleet is the account's own
+// 429 and the reset time it carries (quotahold.go).
 type Quota struct {
 	// WindowHours is how long until the usage period resets. The 429 that
 	// killed the first night named its own reset time ("resets 6pm").
 	WindowHours int `json:"window_hours"`
-	// BudgetUSDWindow is what the FLEET may consume of one window, valued in
-	// the runner's own units. Fleet-wide, because the quota is account-wide.
-	// It is deliberately less than the window holds: the rest is headroom for
-	// the person, who otherwise gets locked out of their own account by a
-	// scheduled job.
-	BudgetUSDWindow float64 `json:"budget_usd_window"`
 }
 
 // window is the plan's reset period, defaulting to the 5-hour session window a
@@ -112,11 +109,10 @@ type Repo struct {
 	// SkipStages are stages this repo has no use for. brax-tennis-rl is a
 	// training project with nothing deployed, so an SLO prober would be
 	// cargo-culting a stage into a repo that cannot use it (fw-fsa.8).
-	SkipStages     []string `json:"skip_stages,omitempty"`
-	Path           string   `json:"path"`
-	Lang           string   `json:"lang"`
-	BudgetUSDMonth int      `json:"budget_usd_month"`
-	Paused         bool     `json:"paused,omitempty"`
+	SkipStages []string `json:"skip_stages,omitempty"`
+	Path       string   `json:"path"`
+	Lang       string   `json:"lang"`
+	Paused     bool     `json:"paused,omitempty"`
 }
 
 type Agent struct {

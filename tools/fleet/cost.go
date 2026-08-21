@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"time"
 )
@@ -86,28 +85,6 @@ func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 		}
 	}
 	return sp, sc.Err()
-}
-
-// OverBudgetRepos reports repos past their declared monthly allowance. A repo
-// that has spent its share pauses until the next window rather than quietly
-// continuing — that is what makes ADR 0001's cost test enforceable rather
-// than decorative.
-func OverBudgetRepos(r Roster, since time.Time) ([]Spend, error) {
-	var over []Spend
-	for _, repo := range r.Repos {
-		if repo.BudgetUSDMonth <= 0 {
-			continue
-		}
-		sp, err := ReadSpend(repo, since)
-		if err != nil {
-			return over, err
-		}
-		if sp.Measured && sp.USD > float64(repo.BudgetUSDMonth) {
-			over = append(over, sp)
-		}
-	}
-	sort.Slice(over, func(i, j int) bool { return over[i].USD > over[j].USD })
-	return over, nil
 }
 
 func (s Spend) String() string {
