@@ -45,3 +45,5 @@
 {"ts":"2026-08-21T15:28:22Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"guards unmerged: main has no budget gate, no 429 halt, concurrent_builders=3. Clear this once PR #44 and #46 land — 'guard.sh resume'."}
 {"ts":"2026-08-21T22:05:00Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
 {"ts":"2026-08-21T22:05:17Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"guards unmerged: quota-hold work is in review, main still has the old dollar gate. Clear when it lands."}
+{"ts":"2026-08-21T22:13:42Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
+{"ts":"2026-08-21T22:22:15Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-ax2","usd":"2.3992","tokens":"2367629","turns":"63"}
