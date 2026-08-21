@@ -22,3 +22,21 @@
 {"ts":"2026-08-17T02:05:49Z","event":"probe.attribution","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"test"}
 {"ts":"2026-08-17T14:36:54Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"D2 fix check"}
 {"ts":"2026-08-17T14:36:54Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
+{"ts":"2026-08-20T21:55:21Z","event":"push.refused","agent":"test/probe","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:56:02Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:56:02Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"master"}
+{"ts":"2026-08-20T21:56:02Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"tags/v1.0.0"}
+{"ts":"2026-08-20T21:56:02Z","event":"push.refused","agent":"unknown","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:56:03Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:56:03Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main,tags/v9"}
+{"ts":"2026-08-20T21:56:16Z","event":"push.refused","agent":"unknown","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"master"}
+{"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"tags/v1.0.0"}
+{"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main,tags/v9"}
+{"ts":"2026-08-20T21:59:23Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:59:23Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"master"}
+{"ts":"2026-08-20T21:59:23Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"tags/v1.0.0"}
+{"ts":"2026-08-20T21:59:24Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:59:24Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main,tags/v9"}

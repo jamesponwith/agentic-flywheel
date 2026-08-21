@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,7 +100,11 @@ func TestWithAgentReplacesRatherThanAppends(t *testing.T) {
 // discarded. Everything looked green while the ledger stayed empty.
 func TestLogSpendReachesTheLedger(t *testing.T) {
 	repo := t.TempDir()
-	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+	// inDir, not a bare exec.Command: git exports GIT_DIR to its hooks, so under
+	// the pre-commit gate this init ran against the real repository, and under
+	// CI's hook-like env it fails outright with "/nonexistent: Permission
+	// denied". Same class as fw-c1l, one file over.
+	if out, err := inDir(repo, "git", "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, "tools/flywheel"), 0o755); err != nil {

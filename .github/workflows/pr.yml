@@ -33,6 +33,13 @@ jobs:
       - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
       - run: go test -race ./...
+      # git exports GIT_DIR and GIT_INDEX_FILE to its hooks, so a test that
+      # shells out to git without a hermetic env acts on the real repository
+      # and exits 128. That fails only under the pre-commit gate and passes by
+      # hand, so it lands green and then blocks every commit (fw-c1l). Running
+      # the suite with the pointers set reproduces the hook here, where it is
+      # visible, instead of on someone's next commit.
+      - run: GIT_DIR=/nonexistent GIT_INDEX_FILE=/nonexistent/index go test ./...
 
   conformance:
     # The protocol's failure behaviour: two agents on one bead, killed agents,
