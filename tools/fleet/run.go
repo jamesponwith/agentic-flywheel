@@ -39,8 +39,13 @@ type Builder struct {
 	// runner reported none, or recording it failed. Zero spend and UNMEASURED
 	// spend mean opposite things (cost.go), and Builder carried no way to tell
 	// them apart.
-	Measured bool   `json:"measured"`
-	Detail   string `json:"detail"`
+	Measured bool `json:"measured"`
+	// RateLimited marks a run that ended because the account ran out of quota
+	// rather than because the work failed. It is not a property of the bead,
+	// so the bead must not be penalised for it and the fleet must stop
+	// dispatching — every remaining builder would buy the same wall.
+	RateLimited bool   `json:"rate_limited"`
+	Detail      string `json:"detail"`
 }
 
 // RunOpts bounds a night. Every field here exists because something without it
@@ -82,6 +87,42 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 	sem := make(chan struct{}, opts.Concurrency)
 	var wg sync.WaitGroup
 
+	// A 429 is the account's quota, not this bead's problem: every builder
+	// still queued would spend its startup cost to discover the same wall.
+	// The first night lost both builders that way, 29 minutes apart, and the
+	// second one's $16 bought a second copy of the same error message.
+	var quota struct {
+		sync.Mutex
+		hit  bool
+		when string
+	}
+
+	// The budget was declared, computed and printed, and never consulted by the
+	// thing that spends the money: cost.go has said "these repos pause until
+	// the next window" since it shipped, and nothing paused.
+	//
+	// It gated the wrong thing in the wrong unit. A Max subscription bills no
+	// marginal dollar, so a per-repo dollars-per-month cap rationed something
+	// that does not exist, while the limit that actually stopped the fleet was
+	// an account-wide window that resets in hours. Gate on the window, and on
+	// the fleet rather than the repo — two builders under every per-repo limit
+	// still emptied one shared pool between them.
+	var (
+		windowSpent float64
+		windowFull  bool
+	)
+	if opts.Execute && r.Caps.Quota.BudgetUSDWindow > 0 {
+		since := time.Now().Add(-r.Caps.Quota.window())
+		if usd, measured, err := FleetWindowSpend(r, since); err == nil && measured {
+			windowSpent = usd
+			windowFull = usd >= r.Caps.Quota.BudgetUSDWindow
+		}
+		// An error is deliberately not fatal: an unreadable ledger must not
+		// stop the fleet, only fail to pause it. Worth stating plainly — this
+		// gate can be blinded, so it is a budget, not a security boundary. The
+		// 429 halt below is the backstop that cannot be.
+	}
+
 	for i, a := range plan.Assignments {
 		wg.Add(1)
 		go func(i int, a Assignment) {
@@ -107,7 +148,35 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 				out[i] = b
 				return
 			}
-			out[i] = build(repo, a, opts)
+			if windowFull {
+				b.Outcome = "skipped"
+				b.Detail = fmt.Sprintf("fleet used $%.2f of its $%.2f allowance for this %s window — "+
+					"not dispatched; the window resets, so this is a wait, not a failure",
+					windowSpent, r.Caps.Quota.BudgetUSDWindow, r.Caps.Quota.window())
+				out[i] = b
+				return
+			}
+			quota.Lock()
+			hit, when := quota.hit, quota.when
+			quota.Unlock()
+			if hit {
+				b.Outcome = "skipped"
+				b.Detail = "account out of quota — not dispatched"
+				if when != "" {
+					b.Detail += " (" + when + ")"
+				}
+				out[i] = b
+				return
+			}
+			res := build(repo, a, opts)
+			if res.RateLimited {
+				quota.Lock()
+				if !quota.hit {
+					quota.hit, quota.when = true, res.Detail
+				}
+				quota.Unlock()
+			}
+			out[i] = res
 		}(i, a)
 	}
 	wg.Wait()
@@ -237,18 +306,23 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// empty review ledger reading as "no findings".
 	commits := commitsSince(repo.Path, base, "bead/"+a.Bead)
 
+	b.Outcome = classify(runErr, commits, ctx.Err() == context.DeadlineExceeded)
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
-		b.Outcome = "timeout"
 		b.Detail = fmt.Sprintf("exceeded %s — bead left open, see %s", opts.PerBuilder, logPath)
+	case runErr != nil && commits > 0:
+		// Exit 0 is not success, and the converse was never handled: a builder
+		// that made five commits and opened a PR before dying on a 429 at the
+		// very end was reported as "abandoned" with no mention of either, and
+		// the night read as a total loss. Non-zero exit is not proof of no
+		// work — the commits are the evidence, in both directions.
+		b.Detail = fmt.Sprintf("%d commit(s) survived, but the run ended on %v — read %s before merging",
+			commits, runErr, logPath)
 	case runErr != nil:
-		b.Outcome = "abandoned"
 		b.Detail = fmt.Sprintf("%v — see %s", runErr, logPath)
 	case commits == 0:
-		b.Outcome = "no-op"
 		b.Detail = fmt.Sprintf("agent exited cleanly but committed nothing — read %s before trusting this", logPath)
 	default:
-		b.Outcome = "green"
 		b.Detail = fmt.Sprintf("%d commit(s), see %s", commits, logPath)
 	}
 	// NOTE: the merge slot is deliberately NOT taken here. It used to be, and it
@@ -266,6 +340,15 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// renders as "unmeasured" rather than as free.
 	if rep, ok := parseRunReport([]byte(captured.String())); ok {
 		b.USD, b.Tokens, b.Turns = rep.TotalCostUSD, rep.tokens(), rep.NumTurns
+		// Orthogonal to the outcome: the run still failed, but Run() needs to
+		// know the wall was the account's quota so it stops dispatching into
+		// it. The bead itself is not at fault and must not look like it is.
+		if rep.rateLimited() {
+			b.RateLimited = true
+			if rep.Result != "" {
+				b.Detail = rep.Result + " — " + b.Detail
+			}
+		}
 		// Never swallowed. A cost that did not reach the ledger is not a
 		// measurement — `fleet cost` reads the ledger, so reporting Measured
 		// here while the ledger stayed empty is the split cost.go was written
@@ -359,4 +442,26 @@ func Digest(bs []Builder) string {
 			b.Repo, b.Bead, b.Outcome, b.Took.Round(time.Second), b.Detail)
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// classify names a builder's outcome from evidence, not from its exit code.
+//
+// Both directions matter and each was learned the hard way. Exit 0 is not
+// success: the first live run blocked on permissions, explained itself, and
+// exited 0 with nothing committed. Exit non-zero is not failure either: the
+// first unattended night ended on a 429 after five commits and a pull request,
+// and reporting that as "abandoned" wrote off work that was already pushed.
+func classify(runErr error, commits int, timedOut bool) string {
+	switch {
+	case timedOut:
+		return "timeout"
+	case runErr != nil && commits > 0:
+		return "salvage"
+	case runErr != nil:
+		return "abandoned"
+	case commits == 0:
+		return "no-op"
+	default:
+		return "green"
+	}
 }

@@ -40,3 +40,6 @@
 {"ts":"2026-08-20T21:59:23Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"tags/v1.0.0"}
 {"ts":"2026-08-20T21:59:24Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
 {"ts":"2026-08-20T21:59:24Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main,tags/v9"}
+{"ts":"2026-08-20T22:32:57Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-dov","usd":"14.6353","tokens":"0","turns":"1"}
+{"ts":"2026-08-20T22:33:19Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-ybs","usd":"16.2387","tokens":"0","turns":"1"}
+{"ts":"2026-08-21T15:28:22Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"guards unmerged: main has no budget gate, no 429 halt, concurrent_builders=3. Clear this once PR #44 and #46 land — 'guard.sh resume'."}

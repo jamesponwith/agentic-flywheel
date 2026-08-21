@@ -31,13 +31,42 @@ type runReport struct {
 		CacheReadInput     int `json:"cache_read_input_tokens"`
 		CacheCreationInput int `json:"cache_creation_input_tokens"`
 	} `json:"usage"`
+	// ModelUsage is the per-model breakdown, and on a run that ended in an API
+	// error it is the only place the totals survive: `usage` describes the last
+	// request, which for a 429 is the one that bought nothing. The first real
+	// night reported usage all-zero next to 19,650,183 cache-read tokens here.
+	ModelUsage map[string]struct {
+		InputTokens        int `json:"inputTokens"`
+		OutputTokens       int `json:"outputTokens"`
+		CacheReadInput     int `json:"cacheReadInputTokens"`
+		CacheCreationInput int `json:"cacheCreationInputTokens"`
+	} `json:"modelUsage"`
+	// APIErrorStatus is the HTTP status that ended the run. 429 means the run
+	// stopped because the account ran out of quota, not because the work was
+	// hard — the fleet must stop dispatching rather than spend the rest of the
+	// night discovering the same wall once per builder.
+	APIErrorStatus int    `json:"api_error_status"`
+	Result         string `json:"result"`
 }
+
+// rateLimited reports whether the run died on quota rather than on the work.
+func (r runReport) rateLimited() bool { return r.APIErrorStatus == 429 }
 
 // tokens is every token the run consumed, cache included. Cache reads are
 // cheaper but not free, and omitting them would understate the bill.
 func (r runReport) tokens() int {
-	return r.Usage.InputTokens + r.Usage.OutputTokens +
+	n := r.Usage.InputTokens + r.Usage.OutputTokens +
 		r.Usage.CacheReadInput + r.Usage.CacheCreationInput
+	if n > 0 {
+		return n
+	}
+	// Fall back to the per-model breakdown, which outlives an API error. Only
+	// when `usage` totals zero: when both are populated they describe the same
+	// tokens, and adding them would double the bill.
+	for _, m := range r.ModelUsage {
+		n += m.InputTokens + m.OutputTokens + m.CacheReadInput + m.CacheCreationInput
+	}
+	return n
 }
 
 // parseRunReport pulls the runner's report out of its output: the last complete
