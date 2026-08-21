@@ -1,27 +1,27 @@
-{"ts":"2026-08-15T16:52:36Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"fleet drill: proving allocate halts"}
+{"ts":"2026-08-15T16:52:36Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"fleet"}
 {"ts":"2026-08-15T16:52:36Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
 {"ts":"2026-08-15T16:52:36Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"fleet","reason":"global drill"}
-{"ts":"2026-08-15T16:52:36Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"fleet"}
+{"ts":"2026-08-15T16:52:36Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"fleet drill: proving allocate halts"}
 {"ts":"2026-08-15T21:40:55Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","agent":"fleet/builder-go"}
 {"ts":"2026-08-15T21:41:04Z","event":"territory.reserved","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","selector":"subtree:tools/fleet","lease":"01a0075e-f870-7c84-b96d-cd44aa1a1475"}
-{"ts":"2026-08-15T21:44:27Z","event":"territory.released","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","lease":"01a0075e-f870-7c84-b96d-cd44aa1a1475"}
 {"ts":"2026-08-15T21:44:27Z","event":"bead.branch_ready","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","branch":"bead/fw-oef.8","commit":"5fb5dba","gate":"green"}
+{"ts":"2026-08-15T21:44:27Z","event":"territory.released","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","lease":"01a0075e-f870-7c84-b96d-cd44aa1a1475"}
 {"ts":"2026-08-15T21:52:15Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","pr":"1","url":"https://github.com/jamesponwith/agentic-flywheel/pull/1"}
 {"ts":"2026-08-15T21:58:03Z","event":"bead.gate_green","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.8","pr":"1","unit":"pass","conformance":"pass","duration":"1m55s"}
 {"ts":"2026-08-16T15:43:12Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-oef.12"}
 {"ts":"2026-08-16T15:45:27Z","event":"bead.branch_ready","agent":"unknown","repo":"agentic-flywheel","bead":"fw-oef.12","branch":"bead/fw-oef.12","gate":"green"}
 {"ts":"2026-08-16T15:47:19Z","event":"bead.closed","agent":"unknown","repo":"agentic-flywheel","bead":"fw-oef.12","pr":"9"}
-{"ts":"2026-08-16T17:34:07Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"verifying run respects the switch"}
+{"ts":"2026-08-16T17:34:07Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"fleet"}
 {"ts":"2026-08-16T17:34:07Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
 {"ts":"2026-08-16T17:34:07Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"fleet","reason":"global"}
-{"ts":"2026-08-16T17:34:07Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"fleet"}
+{"ts":"2026-08-16T17:34:07Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"verifying run respects the switch"}
 {"ts":"2026-08-17T01:14:27Z","event":"bead.pr_opened","agent":"unknown","repo":"agentic-flywheel","bead":"fw-ldz","pr":"19","agent":"fleet/builder-go"}
 {"ts":"2026-08-17T01:14:27Z","event":"review.skipped","agent":"unknown","repo":"agentic-flywheel","bead":"fw-ldz","reason":"docs-only-diff","detail":"no /flywheel-review run; ledger has no entry for PR 19"}
 {"ts":"2026-08-17T01:33:41Z","event":"bead.pr_opened","agent":"agentic-flywheel/builder","repo":"agentic-flywheel","bead":"fw-7mw","pr":"20"}
 {"ts":"2026-08-17T02:05:42Z","event":"probe.attribution","agent":"unknown","repo":"agentic-flywheel","bead":"test"}
 {"ts":"2026-08-17T02:05:49Z","event":"probe.attribution","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"test"}
-{"ts":"2026-08-17T14:36:54Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"D2 fix check"}
 {"ts":"2026-08-17T14:36:54Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
+{"ts":"2026-08-17T14:36:54Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"D2 fix check"}
 {"ts":"2026-08-20T21:55:21Z","event":"push.refused","agent":"test/probe","repo":"agentic-flywheel","refs":"main"}
 {"ts":"2026-08-20T21:56:02Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
 {"ts":"2026-08-20T21:56:02Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"master"}
@@ -31,17 +31,21 @@
 {"ts":"2026-08-20T21:56:03Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main,tags/v9"}
 {"ts":"2026-08-20T21:56:16Z","event":"push.refused","agent":"unknown","repo":"agentic-flywheel","refs":"main"}
 {"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
+{"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main,tags/v9"}
 {"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"master"}
 {"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"tags/v1.0.0"}
-{"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
-{"ts":"2026-08-20T21:56:38Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main,tags/v9"}
 {"ts":"2026-08-20T21:59:23Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
 {"ts":"2026-08-20T21:59:23Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"master"}
 {"ts":"2026-08-20T21:59:23Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"tags/v1.0.0"}
 {"ts":"2026-08-20T21:59:24Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main"}
 {"ts":"2026-08-20T21:59:24Z","event":"push.refused","agent":"fleet/builder-go","repo":"agentic-flywheel","refs":"main,tags/v9"}
+{"ts":"2026-08-20T22:28:25Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-dov","bead":"fw-dov"}
+{"ts":"2026-08-20T22:28:25Z","event":"bead.gate_green","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-dov","bead":"fw-dov"}
 {"ts":"2026-08-20T22:32:57Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-dov","usd":"14.6353","tokens":"0","turns":"1"}
 {"ts":"2026-08-20T22:33:19Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-ybs","usd":"16.2387","tokens":"0","turns":"1"}
 {"ts":"2026-08-21T15:28:22Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"guards unmerged: main has no budget gate, no 429 halt, concurrent_builders=3. Clear this once PR #44 and #46 land — 'guard.sh resume'."}
 {"ts":"2026-08-21T22:05:00Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
 {"ts":"2026-08-21T22:05:17Z","event":"agent.stopped","agent":"unknown","repo":"agentic-flywheel","scope":"repo","reason":"guards unmerged: quota-hold work is in review, main still has the old dollar gate. Clear when it lands."}
+{"ts":"2026-08-21T22:13:42Z","event":"agent.resumed","agent":"unknown","repo":"agentic-flywheel","scope":"repo"}
+{"ts":"2026-08-21T22:22:15Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-ax2","usd":"2.3992","tokens":"2367629","turns":"63"}
+{"ts":"2026-08-21T23:05:26Z","event":"audit.probe","agent":"audit/probe","repo":"agentic-flywheel","note":"mirror-test"}
