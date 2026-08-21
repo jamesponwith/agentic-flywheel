@@ -121,6 +121,53 @@ func TestPushGuardLogsRefusalsWhereItWasPointed(t *testing.T) {
 	}
 }
 
+func TestPushGuardRecordsWhenInvokedTheWayLefthookInvokesIt(t *testing.T) {
+	// The only path on which the guard ever runs for real. It recorded the
+	// refusal when the suite called it directly and recorded nothing under
+	// lefthook, which invokes it as .lefthook/pre-push/push-guard.sh — so
+	// dirname was .lefthook/pre-push, which holds no guard.sh, and the error
+	// went into 2>/dev/null || true. Every push.refused record in the repo
+	// came from tests; not one came from a refusal (fw-51q).
+	//
+	// A symlink does not fix it: bash sets $0 to the path as invoked.
+	dir := scratch(t)
+	tools := filepath.Join(dir, "tools", "flywheel")
+	hookDir := filepath.Join(dir, ".lefthook", "pre-push")
+	for _, d := range []string{tools, hookDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{"guard.sh", "push-guard.sh"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(tools, f), src, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Invoked from a directory that holds no guard.sh, exactly as lefthook does.
+	if err := os.Symlink(filepath.Join(tools, "push-guard.sh"),
+		filepath.Join(hookDir, "push-guard.sh")); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	c := exec.Command("bash", filepath.Join(hookDir, "push-guard.sh"))
+	c.Dir = dir
+	c.Env = append(hermeticEnv(), "FLYWHEEL_AGENT=fleet/builder-go",
+		"FLYWHEEL_HOME="+filepath.Join(dir, "home"))
+	c.Stdin = strings.NewReader(pushLine("refs/heads/main"))
+	out, err := c.CombinedOutput()
+	if err == nil {
+		t.Fatalf("allowed an agent to push main\n%s", out)
+	}
+	lines := readLines(t, filepath.Join(dir, ".flywheel", "agent-log.jsonl"))
+	if len(lines) != 1 || !strings.Contains(lines[0], "push.refused") {
+		t.Fatalf("the guard refused and recorded nothing — a refusal nobody can "+
+			"show happened.\nlog: %q\nstderr: %s", lines, out)
+	}
+}
+
 func TestPushGuardAllowsTheBranchABuilderActuallyUses(t *testing.T) {
 	// A builder's normal path is push a bead branch, open a PR. If the guard
 	// caught that too it would refuse every run rather than the bad ones.

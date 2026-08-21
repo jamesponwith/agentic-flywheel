@@ -68,9 +68,23 @@ done
 if [ "$rc" -ne 0 ]; then
   # Refusals are evidence. A guard that stops something silently cannot be
   # shown to have ever stopped anything.
+  # Resolve guard.sh from the repository, not from $0. lefthook invokes this
+  # as .lefthook/pre-push/push-guard.sh, so dirname was .lefthook/pre-push,
+  # which holds no guard.sh — and that is the ONLY path on which the guard
+  # ever runs for real. Every push.refused record in the log came from the
+  # test suite calling the script directly; not one came from a refusal.
+  # A symlink does not help: bash sets $0 to the path as invoked (fw-51q).
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=""
+  guard="$root/tools/flywheel/guard.sh"
+  [ -x "$guard" ] || guard="$(dirname "$0")/guard.sh"
   # 'agent' is a reserved key: guard.sh resolves who is acting from the
-  # environment and refuses a caller-supplied duplicate with exit 2, which
-  # here would have been swallowed by the || true and logged nothing at all.
-  "$(dirname "$0")/guard.sh" log push.refused refs="$refused" 2>/dev/null || true
+  # environment and refuses a caller-supplied duplicate with exit 2.
+  #
+  # Not silenced. The refusal has already happened and the push is already
+  # refused, so a failure to record must not change the outcome — but it must
+  # not be invisible either, because silence is exactly how this went unnoticed.
+  if ! "$guard" log push.refused refs="$refused" 2>/dev/null; then
+    echo "push-guard: refused, but could not record it via $guard" >&2
+  fi
 fi
 exit "$rc"
