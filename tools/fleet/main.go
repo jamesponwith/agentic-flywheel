@@ -12,6 +12,7 @@
 //	fleet adr-drift                             decisions this branch made without recording
 //	fleet doctor                                which stages each repo is missing
 //	fleet cost                                  what the fleet spent, per repo
+//	fleet review-rate                           what the AI reviewer actually caught
 //	fleet run                                   allocate, then spawn builders (needs -execute)
 package main
 
@@ -42,6 +43,7 @@ func main() {
 	fix := fs.Bool("fix", false, "install missing artifacts from -source; never overwrites")
 	self := fs.Bool("self", false, "diagnose the current repo instead of a roster")
 	onlyBead := fs.String("bead", "", "run exactly this bead, ignoring the queue (for a supervised run)")
+	onlyRepo := fs.String("repo", "", "restrict to one roster repo by name (review-rate)")
 	execute := fs.Bool("execute", false, "actually spawn builders (default is a dry run)")
 	perBuilder := fs.Duration("per-builder", DefaultRunOpts().PerBuilder, "wall-clock cap per builder")
 
@@ -87,6 +89,8 @@ func main() {
 		err = doADRDrift(*dir, *base, *asJSON)
 	case "cost":
 		err = doCost(*rosterPath, *since, *asJSON)
+	case "review-rate":
+		err = doReviewRate(*rosterPath, *onlyRepo, *asJSON)
 	case "doctor":
 		err = doDoctor(*rosterPath, *source, *fix, *asJSON, *self)
 	case "run":
@@ -568,6 +572,88 @@ func doCost(rosterPath, since string, asJSON bool) error {
 	return nil
 }
 
+// doReviewRate reports what the AI reviewer caught, per repo (fw-dov).
+//
+// Findings are grouped by the ledger they were read from rather than by their
+// own repo field: guard.sh stamps that field with the basename of the working
+// directory, so a builder running in a worktree writes "agentic-flywheel-fw-x"
+// for what is the same repo. The file's owner is the reliable key.
+func doReviewRate(rosterPath, repoName string, asJSON bool) error {
+	r, err := LoadRoster(rosterPath)
+	if err != nil {
+		return err
+	}
+	var rates []Rate
+	var fleet []ReviewFinding
+	matched := false
+	unreadable := 0
+	for _, repo := range r.Repos {
+		if repoName != "" && repo.Name != repoName {
+			continue
+		}
+		matched = true
+		fs, err := readLedger(filepath.Join(repo.Path, ".flywheel", "review.jsonl"))
+		if err != nil {
+			// Counted, not just warned. A ledger that exists and cannot be
+			// read must never leave the report saying "unreviewed" — that is
+			// the same lie as a manufactured precision, one level up.
+			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", repo.Name, err)
+			unreadable++
+			continue
+		}
+		rt := rate(fs)
+		rt.Repo = repo.Name
+		rates = append(rates, rt)
+		fleet = append(fleet, fs...)
+	}
+	// A -repo that matches nothing must say so. Printing an empty report for a
+	// typo'd name reads as "this repo has no findings", which is a different
+	// and much more comforting claim.
+	if repoName != "" && !matched {
+		return fmt.Errorf("no repo named %q in %s", repoName, rosterPath)
+	}
+
+	total := rate(fleet)
+	total.Repo = "ALL"
+	// An unreadable ledger makes every number below a floor rather than a
+	// count, so it is an error however the report is rendered.
+	unread := error(nil)
+	if unreadable > 0 {
+		unread = fmt.Errorf("%d ledger(s) could not be read — the counts above are a floor, not a total", unreadable)
+	}
+	if asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(map[string]any{
+			"repos": rates, "fleet": total, "unreadable_ledgers": unreadable,
+		}); err != nil {
+			return err
+		}
+		return unread
+	}
+	fmt.Printf("review findings, by repo (self-agreement needs %d judged; reviewer precision needs judged_by (fw-bu2))\n\n", minSample)
+	for _, rt := range rates {
+		fmt.Println(rt)
+	}
+	// Only worth a separate line when it aggregates more than one ledger;
+	// otherwise it restates the row above it.
+	if len(rates) > 1 {
+		fmt.Printf("\n%s\n", total)
+	}
+	switch {
+	case unreadable > 0:
+		fmt.Printf("\n%d ledger(s) could not be read (see warnings above). What the reviewer caught"+
+			" in those repos is unknown, which is not the same as nothing.\n", unreadable)
+	case total.Total == 0:
+		fmt.Println("\nNo repo has recorded a review finding. This is an unreviewed fleet" +
+			" rather than a clean one (fw-dov).")
+	case !total.Measurable:
+		fmt.Printf("\nNo precision reported: %s.\nIgnored findings stay out of the denominator on purpose"+
+			" — nobody judged them, so they say nothing about whether the reviewer was right.\n", total.Why)
+	}
+	return unread
+}
+
 func defaultRoster() string {
 	if p := os.Getenv("FLEET_ROSTER"); p != "" {
 		return p
@@ -595,6 +681,7 @@ func usage() {
   fleet adr-drift [-dir .] [-base origin/main] [-json]
   fleet doctor [-roster PATH | -self] [-fix -source PATH] [-json]
   fleet cost [-roster PATH] [-since 30.days] [-json]
+  fleet review-rate [-roster PATH] [-repo NAME] [-json]
   fleet run [-roster PATH] [-execute] [-bead ID] [-per-builder 25m] [-json]
 `)
 }
