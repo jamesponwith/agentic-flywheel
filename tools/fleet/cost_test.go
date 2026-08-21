@@ -18,7 +18,7 @@ func logRepo(t *testing.T, lines ...string) Repo {
 		[]byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return Repo{Name: "r", Path: dir, BudgetUSDMonth: 10}
+	return Repo{Name: "r", Path: dir}
 }
 
 func TestReadSpendDistinguishesZeroFromUnmeasured(t *testing.T) {
@@ -83,24 +83,11 @@ func TestReadSpendHonoursTheWindow(t *testing.T) {
 	}
 }
 
-func TestOverBudgetIgnoresUnmeasuredRepos(t *testing.T) {
-	// A repo whose cost was never recorded must not be reported as within
-	// budget OR over it. Silence is the honest answer.
-	r := Roster{Repos: []Repo{logRepo(t, `{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed"}`)}}
-	over, err := OverBudgetRepos(r, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(over) != 0 {
-		t.Errorf("reported an unmeasured repo as over budget: %+v", over)
-	}
-}
-
-func TestOverBudgetCatchesRealOverspend(t *testing.T) {
-	r := Roster{Repos: []Repo{logRepo(t,
-		`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","usd":"12.00"}`)}}
-	over, _ := OverBudgetRepos(r, time.Time{})
-	if len(over) != 1 || over[0].USD != 12.0 {
-		t.Errorf("over = %+v, want the $12 repo against a $10 budget", over)
-	}
-}
+// The two OverBudget tests lived here. They went with the mechanism: nothing
+// gates on dollars any more, and a test for a deleted gate is a test that
+// passes forever without asserting anything about the system.
+//
+// The property worth keeping was "an unmeasured repo is neither within budget
+// nor over it — silence is the honest answer". It survives as
+// TestUnmeasuredIsNotHeadroom, which asserts it about the reading that
+// replaced them.

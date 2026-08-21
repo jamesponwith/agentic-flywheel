@@ -27,6 +27,14 @@ pre-commit:
       run: test -z "$(gofmt -l .)" || { echo "unformatted:"; gofmt -l .; exit 1; }
     vet:
       run: go vet ./...
+    # The conformance suite is not RUN here (it needs real bd databases and
+    # ~75s), but it must still COMPILE here. Twice now a change to a shared
+    # signature left drill_test.go broken and nothing local noticed, because
+    # `go test ./...` does not build what sits behind a build tag — the same
+    # shape as a gate that fails only under the hook. Vet is 0.2s; running it
+    # is cheaper than learning this from CI again.
+    vet-conformance:
+      run: go vet -tags=conformance ./...
     test:
       run: go test -short ./...
     shellsyntax:

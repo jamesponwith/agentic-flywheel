@@ -116,22 +116,41 @@ func TestDrillNoOpBuilderIsNotGreenAndDoesNotStrand(t *testing.T) {
 	}
 }
 
-// DRILL: a repo exhausts its budget. It must pause, loudly.
-func TestDrillOverspentRepoIsReported(t *testing.T) {
+// DRILL: the account hits its usage limit. The fleet must hold, say until
+// when, and come back on its own.
+//
+// This drill used to exhaust a per-repo dollar budget. That budget is gone —
+// a subscription bills no marginal dollar and states no remaining balance, so
+// the number was never checkable. The limit that actually stops the fleet is
+// the account's, and the drill now exercises that: the real 429 message, the
+// hold it produces, and the recovery nobody has to trigger.
+func TestDrillAccountLimitHoldsThenReleases(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".flywheel"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".flywheel", "agent-log.jsonl"),
-		[]byte(`{"ts":"`+time.Now().UTC().Format(time.RFC3339)+`","event":"bead.claimed","usd":"99.00"}`+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r := Roster{Repos: []Repo{{Name: "spendy", Path: dir, BudgetUSDMonth: 10}}}
-	over, err := OverBudgetRepos(r, time.Now().Add(-time.Hour))
+	now := time.Now()
+
+	reset, err := noteRateLimit(dir,
+		"You've hit your session limit \u00b7 resets 6pm (America/Los_Angeles)", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(over) != 1 {
-		t.Fatalf("over = %+v, want the overspent repo", over)
+	if !reset.After(now) {
+		t.Fatalf("reset %s is not in the future; the fleet would dispatch straight back into the wall", reset)
+	}
+
+	until, why, held := heldUntil(dir, now)
+	if !held {
+		t.Fatal("the account said stop and nothing recorded it")
+	}
+	if why == "" {
+		t.Error("held without saying why — an operator finding an idle fleet has nothing to read")
+	}
+	if !until.Equal(reset) {
+		t.Errorf("hold until %s, want %s", until, reset)
+	}
+
+	// And it must lift itself. A hold that needs a human to clear it turns a
+	// scheduled pause into an outage.
+	if _, _, still := heldUntil(dir, reset.Add(time.Minute)); still {
+		t.Error("still held after the account said the quota returned")
 	}
 }
