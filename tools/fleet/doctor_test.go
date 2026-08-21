@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -38,8 +37,7 @@ func repoWith(t *testing.T, paths ...string) Repo {
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
 		{"config", "user.email", "d@d"}, {"config", "user.name", "d"},
 		{"add", "-A"}, {"commit", "-qm", "fixture"}} {
-		c := exec.Command("git", a...)
-		c.Dir = dir
+		c := inDir(dir, "git", a...)
 		_ = c.Run() // an empty fixture has nothing to commit; that is fine
 	}
 	return Repo{Name: "r", Path: dir, Lang: "go"}
@@ -249,8 +247,7 @@ func TestPresentRequiresGitToTrackIt(t *testing.T) {
 	dir := t.TempDir()
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
 		{"config", "user.email", "d@d"}, {"config", "user.name", "d"}} {
-		c := exec.Command("git", a...)
-		c.Dir = dir
+		c := inDir(dir, "git", a...)
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
@@ -262,8 +259,7 @@ func TestPresentRequiresGitToTrackIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, a := range [][]string{{"add", "tracked.md"}, {"commit", "-qm", "add"}} {
-		c := exec.Command("git", a...)
-		c.Dir = dir
+		c := inDir(dir, "git", a...)
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
