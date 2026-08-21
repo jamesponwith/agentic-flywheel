@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"time"
 )
@@ -88,28 +87,6 @@ func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 	return sp, sc.Err()
 }
 
-// OverBudgetRepos reports repos past their declared monthly allowance. A repo
-// that has spent its share pauses until the next window rather than quietly
-// continuing — that is what makes ADR 0001's cost test enforceable rather
-// than decorative.
-func OverBudgetRepos(r Roster, since time.Time) ([]Spend, error) {
-	var over []Spend
-	for _, repo := range r.Repos {
-		if repo.BudgetUSDMonth <= 0 {
-			continue
-		}
-		sp, err := ReadSpend(repo, since)
-		if err != nil {
-			return over, err
-		}
-		if sp.Measured && sp.USD > float64(repo.BudgetUSDMonth) {
-			over = append(over, sp)
-		}
-	}
-	sort.Slice(over, func(i, j int) bool { return over[i].USD > over[j].USD })
-	return over, nil
-}
-
 func (s Spend) String() string {
 	if !s.Measured {
 		return fmt.Sprintf("  %-22s %d builder(s), %d green — cost unmeasured", s.Repo, s.Builders, s.Green)
@@ -120,4 +97,31 @@ func (s Spend) String() string {
 	}
 	return fmt.Sprintf("  %-22s %d builder(s), %d green, $%.2f total, %s per green PR",
 		s.Repo, s.Builders, s.Green, s.USD, per)
+}
+
+// FleetWindowSpend is what every repo together consumed since `since`, valued
+// in the runner's units.
+//
+// Fleet-wide and not per-repo, because the thing being rationed is one account.
+// Two builders in different repos drain the same pool, and a per-repo view
+// cannot see that: on the first unattended night each of them was individually
+// under every limit the roster expressed, and together they took the account
+// away from its owner.
+//
+// ok is false when nothing in the window recorded a cost — unmeasured, which
+// is not the same as free, and which must not be read as headroom.
+func FleetWindowSpend(r Roster, since time.Time) (usd float64, ok bool, err error) {
+	for _, repo := range r.Repos {
+		sp, e := ReadSpend(repo, since)
+		if e != nil {
+			// One unreadable repo must not silently shrink the total, which
+			// would read as headroom the account does not have.
+			return 0, false, e
+		}
+		if sp.Measured {
+			usd += sp.USD
+			ok = true
+		}
+	}
+	return usd, ok, nil
 }

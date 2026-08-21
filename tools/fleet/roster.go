@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Roster struct {
@@ -66,6 +67,37 @@ type Caps struct {
 	// PRsPerNight is the superseded ADR 0006 cap. Read for migration only:
 	// a roster that still sets it gets it treated as weight, with a warning.
 	PRsPerNight int `json:"prs_per_night,omitempty"`
+
+	// Quota describes what actually rations the fleet.
+	Quota Quota `json:"quota"`
+}
+
+// Quota is the account's usage limit, which on a subscription is a period, not
+// a bill — and one the account never states as a number.
+//
+// Two earlier versions guessed at it and both were wrong. Dollars per repo per
+// month rationed something a subscription never charges, and paused a repo for
+// a month over a quota that had already reset. Dollars per window had the right
+// shape and still required a number that maps to nothing the account publishes
+// — there is no command that reports remaining quota, so any figure here is a
+// guess wearing a unit.
+//
+// WindowHours is therefore a reporting period, not a limit: it says how far
+// back "recent usage" looks. What actually paces the fleet is the account's own
+// 429 and the reset time it carries (quotahold.go).
+type Quota struct {
+	// WindowHours is how long until the usage period resets. The 429 that
+	// killed the first night named its own reset time ("resets 6pm").
+	WindowHours int `json:"window_hours"`
+}
+
+// window is the plan's reset period, defaulting to the 5-hour session window a
+// Max subscription rations on.
+func (q Quota) window() time.Duration {
+	if q.WindowHours <= 0 {
+		return 5 * time.Hour
+	}
+	return time.Duration(q.WindowHours) * time.Hour
 }
 
 type Repo struct {
@@ -77,11 +109,10 @@ type Repo struct {
 	// SkipStages are stages this repo has no use for. brax-tennis-rl is a
 	// training project with nothing deployed, so an SLO prober would be
 	// cargo-culting a stage into a repo that cannot use it (fw-fsa.8).
-	SkipStages     []string `json:"skip_stages,omitempty"`
-	Path           string   `json:"path"`
-	Lang           string   `json:"lang"`
-	BudgetUSDMonth int      `json:"budget_usd_month"`
-	Paused         bool     `json:"paused,omitempty"`
+	SkipStages []string `json:"skip_stages,omitempty"`
+	Path       string   `json:"path"`
+	Lang       string   `json:"lang"`
+	Paused     bool     `json:"paused,omitempty"`
 }
 
 type Agent struct {

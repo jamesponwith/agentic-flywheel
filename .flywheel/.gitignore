@@ -6,3 +6,4 @@ agent
 
 # flaky quarantine ledger is per-machine detection state
 flaky.jsonl
+quota-hold
