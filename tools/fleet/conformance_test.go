@@ -191,6 +191,68 @@ func TestConformanceKillSwitchHaltsMidCycle(t *testing.T) {
 	}
 }
 
+// TestConformanceReviewLedgerRoundTrip: readLedger must parse a ledger written
+// by the real guard.sh, not one hand-authored beside the parser.
+//
+// This repo's own review ledger records that failure: PR 43's cost parser was
+// tested against a fixture authored beside it, so the test proved the parser
+// matched the fixture rather than the writer, and the parser turned out to
+// depend on a key order the runner never guaranteed. review-rate reads a file
+// produced by a shell function, so the same trap is one fixture away.
+func TestConformanceReviewLedgerRoundTrip(t *testing.T) {
+	dir := scratchRepo(t)
+	guard, err := filepath.Abs("../flywheel/guard.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(guard); err != nil {
+		t.Skipf("guard.sh not found: %v", err)
+	}
+
+	// A claim carrying the characters that break naive JSON writers, so a
+	// finding recorded during a real review survives the round trip.
+	claim := `quotes " backslash \ tab	and a comma, all in one claim`
+	for _, disposition := range []string{"accepted", "rejected", "ignored"} {
+		cmd := exec.Command(guard, "finding",
+			"lens=correctness", "file=tools/fleet/reviewrate.go", "line=42",
+			"severity=medium", "claim="+claim, "disposition="+disposition)
+		cmd.Dir = dir
+		cmd.Env = append(hermeticEnv(), "FLYWHEEL_AGENT=conformance/builder")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("guard.sh finding %s: %v\n%s", disposition, err, out)
+		}
+	}
+
+	fs, err := readLedger(filepath.Join(dir, ".flywheel", "review.jsonl"))
+	if err != nil {
+		t.Fatalf("readLedger on a guard.sh-written ledger: %v", err)
+	}
+	if len(fs) != 3 {
+		t.Fatalf("read %d finding(s) of 3 — the parser does not match the writer", len(fs))
+	}
+	for _, f := range fs {
+		if f.Claim != claim {
+			t.Errorf("claim round-tripped as %q, want %q", f.Claim, claim)
+		}
+		// The fields guard.sh stamps itself, rather than taking as k=v, are
+		// the ones a hand-written fixture is most likely to get wrong.
+		if f.TS == "" || f.Commit == "" || f.Branch == "" || f.Repo == "" {
+			t.Errorf("guard.sh-stamped fields missing: %+v", f)
+		}
+		if f.Severity != "medium" || f.Line != "42" {
+			t.Errorf("finding = %+v, want severity medium and line 42", f)
+		}
+	}
+
+	r := rate(fs)
+	if r.Accepted != 1 || r.Rejected != 1 || r.Ignored != 1 || r.Total != 3 {
+		t.Errorf("rate = %+v, want 1/1/1 of 3", r)
+	}
+	if r.Measurable {
+		t.Errorf("measured a precision from 2 judged findings: %+v", r)
+	}
+}
+
 // TestConformanceCapsAreNeverExceeded against a real queue.
 func TestConformanceCapsAreNeverExceeded(t *testing.T) {
 	dir := scratchRepo(t)

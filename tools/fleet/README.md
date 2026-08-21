@@ -14,6 +14,8 @@ fleet hydrate                               make every repo's beads readable
 fleet bypasses                              gates that got skipped, and by how much
 fleet adr-drift                             decisions this branch made without recording
 fleet doctor                                which stages each repo is missing
+fleet cost                                  what the fleet spent, per repo
+fleet review-rate                           what the AI reviewer actually caught
 fleet run                                   allocate, then spawn builders (needs -execute)
 ```
 
@@ -97,6 +99,40 @@ nothing to do", which is the one lie that would make the fleet untrustworthy.
 The kill switch (`tools/flywheel/guard.sh`) outranks everything and halts the
 whole cycle — half a fleet is a worse state than a stopped one.
 
+## Why review-rate refuses to divide
+
+```
+fleet review-rate [-roster PATH] [-repo NAME] [-json]
+```
+
+WRITEUP.md names two things the flywheel could not tell you about itself. One
+was whether the AI reviewer catches more than it costs — and half that answer
+was already on disk, unread. Every `guard.sh finding` appends a line to
+`.flywheel/review.jsonl` carrying a disposition; nothing but `wc -l` had ever
+looked at it.
+
+Two refusals do the work, and both are about declining to manufacture a number
+that flatters the reviewer:
+
+- **`ignored` is not `rejected`.** A finding nobody judged is not a finding
+  judged wrong. Precision divides accepted by *accepted + rejected* only;
+  ignored findings never enter the denominator. Collapsing the two would let
+  you pick whichever denominator gave the prettier answer.
+- **A handful of findings is not a rate.** Below `minSample` judged findings
+  the command says so and prints no percentage at all, the same way `cost.go`
+  distinguishes zero spend from unmeasured spend. An unmeasurable rate that
+  renders as `0%` reads as "the reviewer is always wrong", which the ledger
+  does not say.
+
+A disposition outside the three known values is counted in the total and in no
+bucket, and the gap is printed rather than folded into `ignored` — that would
+be the same error one layer down. A missing ledger is "no reviews recorded"; a
+ledger that exists and cannot be read is an **error**, because that is a broken
+thing pretending to be an empty one.
+
+Today it reports the honest answer: no precision yet. The number arrives when
+the ledger does.
+
 ## Conformance
 
 ```
@@ -107,6 +143,12 @@ Runs against a real `bd` database in scratch repos, asserting the failure
 behaviour: two agents cannot hold one bead, a killed agent's work returns to the
 queue with a note, a stale agent cannot resurrect its lease, human work is never
 reclaimed, the kill switch halts mid-cycle, and caps are never exceeded.
+
+It also round-trips the review ledger through the real `guard.sh finding`
+rather than a fixture. This repo's own ledger records why: PR 43's cost parser
+was tested against a fixture authored beside it, so the test proved the parser
+matched the fixture rather than the writer — and the parser turned out to
+depend on a key order the runner never guaranteed.
 
 Territory conformance (blackbird file reservations) is **not** here — the
 reservation API is MCP-only, so it is agent-driven. See `fw-wb2.7`.
