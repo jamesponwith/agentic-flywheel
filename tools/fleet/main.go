@@ -631,7 +631,7 @@ func doReviewRate(rosterPath, repoName string, asJSON bool) error {
 		}
 		return unread
 	}
-	fmt.Printf("review findings, by repo (precision needs %d judged)\n\n", minSample)
+	fmt.Printf("review findings, by repo (self-agreement needs %d judged; reviewer precision needs judged_by (fw-bu2))\n\n", minSample)
 	for _, rt := range rates {
 		fmt.Println(rt)
 	}

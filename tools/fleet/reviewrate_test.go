@@ -291,3 +291,20 @@ func TestRateStringNamesUnbucketedFindings(t *testing.T) {
 		t.Errorf("String() = %q, want it to name the 2 unbucketed findings", r.String())
 	}
 }
+
+func TestTheNumberIsNotCalledPrecision(t *testing.T) {
+	// The ledger does not record who judged a finding separately from who
+	// raised it, and most entries are the same builder in the same run. The
+	// figure is real; calling it "precision" is what makes it misleading —
+	// the same shape as the 100% gate rate and the zero rework that both had
+	// to be retracted (fw-bu2). Guard the label, not just the arithmetic.
+	r := Rate{Repo: "r", Total: 12, Accepted: 8, Rejected: 3, Ignored: 1,
+		Measurable: true, Precision: 8.0 / 11.0}
+	got := r.String()
+	if strings.Contains(got, "precision 73%") || !strings.Contains(got, "self-agreement") {
+		t.Errorf("rendered as reviewer precision:\n  %s", got)
+	}
+	if !strings.Contains(got, "fw-bu2") {
+		t.Errorf("does not point at what would make it precision:\n  %s", got)
+	}
+}
