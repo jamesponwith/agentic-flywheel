@@ -16,7 +16,12 @@
   "caps": {
     "review_weight_per_night": 8,
     "concurrent_builders": 1,
-    "repos_per_night": 2
+    "repos_per_night": 2,
+    "_quota": "What actually rations the fleet. The account is a Max subscription: it bills no marginal dollar, so the usd figures the runner reports are API-equivalent valuation, not money, and the limit that bites is a usage window that RESETS. budget_usd_window is what the fleet may take of one window, fleet-wide because the quota is account-wide \u2014 two builders under every per-repo limit still emptied one pool between them and locked the owner out until 6pm. It is set below what the window holds on purpose: the remainder is headroom for the person, who is not a background job and should not have to queue behind one.",
+    "quota": {
+      "window_hours": 5,
+      "budget_usd_window": 20
+    }
   },
   "repos": [
     {

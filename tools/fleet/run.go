@@ -99,21 +99,28 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 
 	// The budget was declared, computed and printed, and never consulted by the
 	// thing that spends the money: cost.go has said "these repos pause until
-	// the next window" since it shipped, and nothing paused. The first real
-	// night spent $30.87 against a $15/month allowance because the only thing
-	// standing between the roster's number and the runner was a sentence in a
-	// report nobody was awake to read.
-	overBudget := map[string]Spend{}
-	if opts.Execute {
-		if over, err := OverBudgetRepos(r, time.Now().AddDate(0, -1, 0)); err == nil {
-			for _, sp := range over {
-				overBudget[sp.Repo] = sp
-			}
+	// the next window" since it shipped, and nothing paused.
+	//
+	// It gated the wrong thing in the wrong unit. A Max subscription bills no
+	// marginal dollar, so a per-repo dollars-per-month cap rationed something
+	// that does not exist, while the limit that actually stopped the fleet was
+	// an account-wide window that resets in hours. Gate on the window, and on
+	// the fleet rather than the repo — two builders under every per-repo limit
+	// still emptied one shared pool between them.
+	var (
+		windowSpent float64
+		windowFull  bool
+	)
+	if opts.Execute && r.Caps.Quota.BudgetUSDWindow > 0 {
+		since := time.Now().Add(-r.Caps.Quota.window())
+		if usd, measured, err := FleetWindowSpend(r, since); err == nil && measured {
+			windowSpent = usd
+			windowFull = usd >= r.Caps.Quota.BudgetUSDWindow
 		}
-		// An error here is deliberately not fatal: an unreadable ledger must
-		// not stop the fleet, it must only fail to pause it. That asymmetry is
-		// worth stating — this gate can be blinded, so it is a budget, not a
-		// security boundary.
+		// An error is deliberately not fatal: an unreadable ledger must not
+		// stop the fleet, only fail to pause it. Worth stating plainly — this
+		// gate can be blinded, so it is a budget, not a security boundary. The
+		// 429 halt below is the backstop that cannot be.
 	}
 
 	for i, a := range plan.Assignments {
@@ -141,10 +148,11 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 				out[i] = b
 				return
 			}
-			if sp, ok := overBudget[a.Repo]; ok {
+			if windowFull {
 				b.Outcome = "skipped"
-				b.Detail = fmt.Sprintf("over budget: %s this window against $%d/month — not dispatched (ADR 0001)",
-					fmt.Sprintf("$%.2f", sp.USD), budgetOf(r, a.Repo))
+				b.Detail = fmt.Sprintf("fleet used $%.2f of its $%.2f allowance for this %s window — "+
+					"not dispatched; the window resets, so this is a wait, not a failure",
+					windowSpent, r.Caps.Quota.BudgetUSDWindow, r.Caps.Quota.window())
 				out[i] = b
 				return
 			}
@@ -434,14 +442,6 @@ func Digest(bs []Builder) string {
 			b.Repo, b.Bead, b.Outcome, b.Took.Round(time.Second), b.Detail)
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-// budgetOf is the repo's declared monthly allowance, or 0 when it declared none.
-func budgetOf(r Roster, name string) int {
-	if repo, ok := r.Repo(name); ok {
-		return repo.BudgetUSDMonth
-	}
-	return 0
 }
 
 // classify names a builder's outcome from evidence, not from its exit code.

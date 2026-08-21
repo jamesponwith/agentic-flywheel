@@ -529,7 +529,12 @@ func doCost(rosterPath, since string, asJSON bool) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
-	fmt.Printf("fleet spend since %s\n\n", from.Format("2006-01-02"))
+	// "spend" is API-equivalent valuation, not money: the account is a
+	// subscription and charges no marginal dollar. Saying so once here keeps
+	// the report from reading as a bill and keeps the numbers useful for what
+	// they actually proxy — how much of a usage window the fleet consumed.
+	fmt.Printf("fleet usage since %s (API-equivalent value; a subscription bills no marginal dollar)\n\n",
+		from.Format("2006-01-02 15:04"))
 	measured := 0
 	for _, sp := range all {
 		fmt.Println(sp)
@@ -542,12 +547,32 @@ func doCost(rosterPath, since string, asJSON bool) error {
 		fmt.Println("\nNo repo recorded a cost. The runner does not yet report usd/tokens" +
 			" into the audit log, so this is unmeasured rather than zero (fw-e7e.2).")
 	}
+	// What actually gates dispatch: the account's window, fleet-wide.
+	if q := r.Caps.Quota; q.BudgetUSDWindow > 0 {
+		usd, ok, err := FleetWindowSpend(r, time.Now().Add(-q.window()))
+		if err != nil {
+			return err
+		}
+		switch {
+		case !ok:
+			fmt.Printf("\nwindow (%s): unmeasured — not the same as free, and not headroom\n", q.window())
+		case usd >= q.BudgetUSDWindow:
+			fmt.Printf("\nWINDOW FULL — $%.2f of $%.2f this %s. The fleet will not dispatch until it resets.\n",
+				usd, q.BudgetUSDWindow, q.window())
+		default:
+			fmt.Printf("\nwindow (%s): $%.2f of $%.2f used\n", q.window(), usd, q.BudgetUSDWindow)
+		}
+	}
+	// Per-repo monthly budgets are attribution, NOT a gate — they say which
+	// repo is eating the account, and nothing pauses on them. This line used to
+	// read "these repos pause until the next window" while nothing paused,
+	// which is the class of claim this tool exists to stop making.
 	over, err := OverBudgetRepos(r, from)
 	if err != nil {
 		return err
 	}
 	if len(over) > 0 {
-		fmt.Printf("\nOVER BUDGET — these repos pause until the next window (ADR 0001):\n")
+		fmt.Printf("\nheaviest repos against their declared monthly share (attribution only, not a gate):\n")
 		for _, sp := range over {
 			fmt.Println(sp)
 		}
