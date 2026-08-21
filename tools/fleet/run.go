@@ -273,7 +273,13 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// Hand the builder the canonical project_key rather than letting it derive
 	// one. A builder resolving its own path can disagree with the coordinator
 	// under a symlink, and two agents on different keys never conflict.
-	cmd.Env = append(withAgent(hermeticEnv(), a.Agent), "FLYWHEEL_PROJECT_KEY="+repo.Path)
+	// withIdentity, because the builder cannot read its own token: the sandbox
+	// scopes reads to the worktree and ADR 0003 forbids agents reading secrets
+	// anyway. The coordinator is under neither constraint, so it hands the
+	// identity over rather than sending the builder to look for it (fw-eoi).
+	cmd.Env = withIdentity(
+		append(withAgent(hermeticEnv(), a.Agent), "FLYWHEEL_PROJECT_KEY="+repo.Path),
+		repo.Name)
 
 	// Poll the kill switch while the builder runs. Without this the switch only
 	// gated ALLOCATION: a human pulling it at 2am would watch every in-flight
