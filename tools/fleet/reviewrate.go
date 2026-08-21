@@ -58,8 +58,10 @@ type Rate struct {
 	Rejected int    `json:"rejected"`
 	Ignored  int    `json:"ignored"`
 	Total    int    `json:"total"`
-	// Precision is Accepted/(Accepted+Rejected) — findings a human judged and
-	// agreed with, over findings a human judged at all. Meaningless unless
+	// Precision is Accepted/(Accepted+Rejected) — findings judged and agreed
+	// with, over findings judged at all. NOTE: the ledger does not record who
+	// judged separately from who raised, so today this is self-agreement and
+	// is rendered under that name (fw-bu2). Meaningless unless
 	// Measurable, and left at zero in that case so a careless reader cannot
 	// mistake it for a real zero.
 	Precision float64 `json:"precision"`
@@ -159,5 +161,13 @@ func (r Rate) String() string {
 		// to refuse.
 		return line + " — " + r.Why
 	}
-	return line + fmt.Sprintf(" — precision %.0f%% over %d judged", r.Precision*100, r.Accepted+r.Rejected)
+	// "self-agreement", not "precision", until the ledger records who judged a
+	// finding separately from who raised it. Today most entries are the same
+	// builder in the same run, so the figure is a reviewer agreeing with
+	// itself. That is not wrong, it is flattering in a way no reader would
+	// guess — the same shape as the 100% gate rate and the zero rework that
+	// both had to be retracted. It gets the honest name until fw-bu2 adds
+	// judged_by, and then it can earn the other one.
+	return line + fmt.Sprintf(" — %.0f%% self-agreement over %d judged (not reviewer precision: fw-bu2)",
+		r.Precision*100, r.Accepted+r.Rejected)
 }
