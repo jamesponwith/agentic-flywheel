@@ -1,4 +1,5 @@
 {
+  "_caps_note": "concurrent_builders is 1, not a compute limit: every builder draws on ONE account quota, so running two in parallel halves the time to the wall and doubles what a 429 costs. The first night lost both at once, 29 minutes in, $30.87 for a wall discovered twice.",
   "_comment": "The fleet's constitution. Repo paths are relative to workspace_root ($FLYWHEEL_WORKSPACE, or ~/Workspace) so the roster is portable and says nothing about the host. Caps derive from review capacity, not compute (ADR 0006). Readable in ten seconds, diffable in review \u2014 keep it that way.",
   "workspace_root": "~/Workspace",
   "_runner": "How a builder is invoked (ADR 0010). The agent is a role, not a product \u2014 swap cmd/args for a different CLI, or set FLYWHEEL_AGENT_CMD to override everywhere including shell hooks. Args here REPLACE the built-in default rather than extending it, so a runner that omits its cost flag reports no spend and every run lands UNMEASURED \u2014 keep --output-format json, or whatever the swapped-in agent calls it.",
@@ -14,7 +15,7 @@
   },
   "caps": {
     "review_weight_per_night": 8,
-    "concurrent_builders": 3,
+    "concurrent_builders": 1,
     "repos_per_night": 2
   },
   "repos": [
