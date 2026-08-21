@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Roster struct {
@@ -66,6 +67,40 @@ type Caps struct {
 	// PRsPerNight is the superseded ADR 0006 cap. Read for migration only:
 	// a roster that still sets it gets it treated as weight, with a warning.
 	PRsPerNight int `json:"prs_per_night,omitempty"`
+
+	// Quota describes what actually rations the fleet.
+	Quota Quota `json:"quota"`
+}
+
+// Quota is the account's usage limit, which on a subscription is a period, not
+// a bill.
+//
+// The first version of this gate got the unit and the shape both wrong. It
+// capped dollars per repo per month, and a Max subscription charges no
+// marginal dollar — total_cost_usd is API-equivalent valuation, not money —
+// while the limit that actually stopped the fleet was an ACCOUNT session
+// window that resets in hours. So the gate paused one repo for a month over a
+// quota that had already reset, and could not see the two builders draining
+// one shared pool at once, which was the real failure.
+type Quota struct {
+	// WindowHours is how long until the usage period resets. The 429 that
+	// killed the first night named its own reset time ("resets 6pm").
+	WindowHours int `json:"window_hours"`
+	// BudgetUSDWindow is what the FLEET may consume of one window, valued in
+	// the runner's own units. Fleet-wide, because the quota is account-wide.
+	// It is deliberately less than the window holds: the rest is headroom for
+	// the person, who otherwise gets locked out of their own account by a
+	// scheduled job.
+	BudgetUSDWindow float64 `json:"budget_usd_window"`
+}
+
+// window is the plan's reset period, defaulting to the 5-hour session window a
+// Max subscription rations on.
+func (q Quota) window() time.Duration {
+	if q.WindowHours <= 0 {
+		return 5 * time.Hour
+	}
+	return time.Duration(q.WindowHours) * time.Hour
 }
 
 type Repo struct {

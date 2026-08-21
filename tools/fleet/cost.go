@@ -121,3 +121,30 @@ func (s Spend) String() string {
 	return fmt.Sprintf("  %-22s %d builder(s), %d green, $%.2f total, %s per green PR",
 		s.Repo, s.Builders, s.Green, s.USD, per)
 }
+
+// FleetWindowSpend is what every repo together consumed since `since`, valued
+// in the runner's units.
+//
+// Fleet-wide and not per-repo, because the thing being rationed is one account.
+// Two builders in different repos drain the same pool, and a per-repo view
+// cannot see that: on the first unattended night each of them was individually
+// under every limit the roster expressed, and together they took the account
+// away from its owner.
+//
+// ok is false when nothing in the window recorded a cost — unmeasured, which
+// is not the same as free, and which must not be read as headroom.
+func FleetWindowSpend(r Roster, since time.Time) (usd float64, ok bool, err error) {
+	for _, repo := range r.Repos {
+		sp, e := ReadSpend(repo, since)
+		if e != nil {
+			// One unreadable repo must not silently shrink the total, which
+			// would read as headroom the account does not have.
+			return 0, false, e
+		}
+		if sp.Measured {
+			usd += sp.USD
+			ok = true
+		}
+	}
+	return usd, ok, nil
+}
