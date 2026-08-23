@@ -297,3 +297,24 @@ func TestProbeGuardFollowsCoreHooksPath(t *testing.T) {
 		t.Errorf("read the ignored .git/hooks copy instead of the live one: %s", why)
 	}
 }
+
+func TestTheReasonQuotesTheHookNotItsFrame(t *testing.T) {
+	// doctor reported "the pre-push hook let an agent push main: ╭─────────╮".
+	// True, and useless: it could not be told from a guard that is missing.
+	out := "╭───────────────╮\n│ 🥊 lefthook   │\n╰───────────────╯\npush-guard: fleet/x may not push to 'main'.\n"
+	got := firstLine(out)
+	if strings.ContainsAny(got, "╭╮╰╯─│") {
+		t.Errorf("reason is box art: %q", got)
+	}
+	if !strings.Contains(got, "may not push") {
+		t.Errorf("reason does not quote what the hook said: %q", got)
+	}
+}
+
+func TestOutputThatIsAllFrameCarriesNoReason(t *testing.T) {
+	// The finding's own sentence already says what happened. This adds why, or
+	// it adds nothing — padding it with a border helps no one.
+	if got := firstLine("╭──╮\n╰──╯\n"); got != "" {
+		t.Errorf("quoted the frame for want of anything better: %q", got)
+	}
+}

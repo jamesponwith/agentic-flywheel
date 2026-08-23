@@ -203,7 +203,10 @@ func underRepo(repoPath, p string) string {
 func firstLine(out string) string {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || isDecoration(line) {
+			// lefthook opens with a drawn banner, so the first non-empty line
+			// was "╭─────────╮" — a reason that tells the reader nothing about
+			// why their guard is dead. Skip the frame, quote the sentence.
 			continue
 		}
 		if r := []rune(line); len(r) > 120 {
@@ -212,4 +215,19 @@ func firstLine(out string) string {
 		return ": " + line
 	}
 	return ""
+}
+
+// isDecoration reports whether a line belongs to a runner's drawn frame.
+//
+// Any box-drawing rune anywhere marks the line, because lefthook puts its
+// title INSIDE the box ("│ 🥊 lefthook │") — testing for a line that is only
+// frame skips the borders and then quotes the title instead. Hooks do not draw
+// boxes around their own messages, so this costs nothing real.
+func isDecoration(line string) bool {
+	for _, r := range line {
+		if (r >= 0x2500 && r <= 0x257F) || (r >= 0x2580 && r <= 0x259F) {
+			return true
+		}
+	}
+	return false
 }
