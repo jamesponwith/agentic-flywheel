@@ -133,3 +133,27 @@ func TestAMissingMirrorIsAnError(t *testing.T) {
 		t.Errorf("claimed to restore from a mirror that does not exist: %s", out)
 	}
 }
+
+func TestRestoreReportsOneCountNotTwo(t *testing.T) {
+	// `grep -c` PRINTS 0 and exits 1 on no match, so `|| echo 0` appended a
+	// second zero and the message read "restored: 0\n0 -> 2 records". A
+	// recovery tool whose own output is malformed is not one anybody will
+	// trust with a ledger.
+	dir := scratch(t)
+	state := t.TempDir()
+	guardIn(t, dir, state, "fleet/builder", "log", "bead.cost", "usd=1.00")
+	if err := os.WriteFile(filepath.Join(dir, ".flywheel", "agent-log.jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, code := guardIn(t, dir, state, "", "restore-log")
+	if code != 0 {
+		t.Fatalf("restore-log failed: %s", out)
+	}
+	got := strings.TrimSpace(out)
+	if strings.Count(got, "\n") != 0 {
+		t.Errorf("restore printed %d lines, want 1:\n%q", strings.Count(got, "\n")+1, got)
+	}
+	if !strings.Contains(got, "restored: 0 -> 1 records") {
+		t.Errorf("count is malformed: %q", got)
+	}
+}
