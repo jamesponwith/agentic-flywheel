@@ -29,6 +29,24 @@ attributable.
 
 ## 1. Identity
 
+**First read `.flywheel/run-context.json` in your worktree.** It is the only
+channel that reaches you: you cannot read your own environment — the sandbox
+refuses `/proc/self/environ` as "may expose secrets", and `env`, `printenv`,
+`awk ENVIRON[...]` and `node -e process.env` are all outside the allowlist.
+Two runs were lost discovering that, the second after the identity had been
+put in the environment specifically for it (fw-eoi, then fw-k8f).
+
+If `"solo": true`, **skip this whole section** — no registration, no
+reservation — and go straight to step 2. Say in your report that you ran solo.
+Reservations exist to stop two agents editing the same file; when you are the
+only builder that can be running there is no second agent, so a reservation
+buys nothing and has cost every run so far. `concurrent_builders` in the same
+file is where `solo` came from, so you can check the reasoning rather than
+trust the flag.
+
+If `"solo": false`, the rest of this section applies and **no reservation
+still means no edit**.
+
 Register with blackbird before acting (ADR 0004):
 
 - `blackbird_agent_register` with `agent_name` = `<repo>/builder` and
