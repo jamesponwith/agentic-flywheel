@@ -188,11 +188,17 @@ cmd_restore_log() {
   fi
   mkdir -p "$REPO_STATE"; : >> "$LOG"
   local before merged
-  before=$(grep -c . "$LOG" 2>/dev/null || echo 0)
+  # `|| echo 0` is wrong here: grep -c PRINTS 0 and then exits 1 on no match,
+  # so the substitution captured "0", the echo appended another, and the
+  # message came out as "restored: 0\n0 -> 2 records". Under set -e the bare
+  # grep would abort instead, so it needs `|| :` rather than nothing.
+  before=$(grep -c . "$LOG" 2>/dev/null || :)
+  before=${before:-0}
   merged=$(mktemp)
   cat "$LOG" "$MIRROR" | grep -v '^[[:space:]]*$' | sort -u > "$merged"
   mv "$merged" "$LOG"
-  echo "restored: $before -> $(grep -c . "$LOG") records"
+  after=$(grep -c . "$LOG" 2>/dev/null || :)
+  echo "restored: $before -> ${after:-0} records"
 }
 
 # finding — append one review finding to .flywheel/review.jsonl.
