@@ -196,7 +196,13 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	base := headOf(repo.Path)
 
 	// Worktree first: if this fails, nothing has been claimed or edited.
-	if err := git2(repo.Path, "worktree", "add", "-b", "bead/"+a.Bead, wt); err != nil {
+	branch := "bead/" + a.Bead
+	if err := clearEmptyBranch(repo.Path, base, branch); err != nil {
+		b.Outcome, b.Detail = "error", err.Error()
+		b.Took = time.Since(b.Started)
+		return b
+	}
+	if err := git2(repo.Path, "worktree", "add", "-b", branch, wt); err != nil {
 		b.Outcome, b.Detail = "error", "worktree: "+err.Error()
 		b.Took = time.Since(b.Started)
 		return b
@@ -273,7 +279,13 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// Hand the builder the canonical project_key rather than letting it derive
 	// one. A builder resolving its own path can disagree with the coordinator
 	// under a symlink, and two agents on different keys never conflict.
-	cmd.Env = append(withAgent(hermeticEnv(), a.Agent), "FLYWHEEL_PROJECT_KEY="+repo.Path)
+	// withIdentity, because the builder cannot read its own token: the sandbox
+	// scopes reads to the worktree and ADR 0003 forbids agents reading secrets
+	// anyway. The coordinator is under neither constraint, so it hands the
+	// identity over rather than sending the builder to look for it (fw-eoi).
+	cmd.Env = withIdentity(
+		append(withAgent(hermeticEnv(), a.Agent), "FLYWHEEL_PROJECT_KEY="+repo.Path),
+		repo.Name)
 
 	// Poll the kill switch while the builder runs. Without this the switch only
 	// gated ALLOCATION: a human pulling it at 2am would watch every in-flight
@@ -464,4 +476,38 @@ func classify(runErr error, commits int, timedOut bool) string {
 	default:
 		return "green"
 	}
+}
+
+// clearEmptyBranch removes a leftover bead branch that carries no work, so a
+// bead can be attempted twice.
+//
+// A builder that commits nothing still leaves bead/<id> behind — the worktree
+// is detached on the way out but the branch survives, because the branch IS the
+// work whenever there is any. When there is none, that leftover makes the next
+// `worktree add -b` fail with "a branch named 'bead/<id>' already exists", and
+// the bead can never be attempted again: one no-op locks it forever. The queue
+// self-locks one bead at a time, and nothing says why.
+//
+// A branch carrying commits is never touched. That is reconcile's rule and it
+// is the important half — losing an agent's pushed work to a tidy-up is far
+// worse than a stuck bead, so this refuses rather than guesses.
+func clearEmptyBranch(repoPath, base, branch string) error {
+	if err := git2(repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return nil // no such branch; nothing to clear
+	}
+	// Any worktree still holding it is a live builder, not a leftover.
+	out, err := inDir(repoPath, "git", "worktree", "list", "--porcelain").Output()
+	if err == nil && strings.Contains(string(out), "branch refs/heads/"+branch+"\n") {
+		return fmt.Errorf("worktree: %s is checked out in another worktree — "+
+			"a builder may still be running; not touching it", branch)
+	}
+	n := commitsSince(repoPath, base, branch)
+	if n > 0 {
+		return fmt.Errorf("worktree: %s already exists with %d unmerged commit(s) — "+
+			"refusing to delete an agent's work; merge or drop it by hand", branch, n)
+	}
+	if err := git2(repoPath, "branch", "-D", branch); err != nil {
+		return fmt.Errorf("worktree: could not clear the empty leftover %s: %w", branch, err)
+	}
+	return nil
 }
