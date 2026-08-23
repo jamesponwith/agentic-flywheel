@@ -28,6 +28,10 @@ Description=Flywheel nightly fleet run
 [Service]
 Type=oneshot
 WorkingDirectory=$PWD
+# The installer's PATH, captured. A systemd user service otherwise gets a
+# minimal one with no go, no bd and no gh, and the run dies before it starts —
+# which is exactly how the first unattended night was lost.
+Environment=PATH=$PATH
 ExecStart=$PWD/tools/flywheel/nightly.sh run
 UNIT
   cat > "$HOME/.config/systemd/user/flywheel-nightly.timer" <<UNIT
@@ -51,6 +55,16 @@ run)
   if ! tools/flywheel/guard.sh check; then
     echo "nightly: halted by the kill switch"; exit 0
   fi
+  # A timer's PATH is not a login shell's. Fail here, by name, rather than
+  # inside a subprocess whose error the digest will paraphrase.
+  for need in go git; do
+    command -v "$need" >/dev/null 2>&1 || {
+      echo "nightly: '$need' is not on PATH ($PATH)" >&2
+      echo "nightly: reinstall with 'nightly.sh install' to capture the current PATH" >&2
+      exit 127
+    }
+  done
+
   mkdir -p "$DIGEST_DIR"
   stamp=$(date -u +%Y-%m-%dT%H%M%SZ)
   digest="$DIGEST_DIR/$stamp.md"
@@ -62,8 +76,20 @@ run)
   {
     echo "# fleet run $stamp"
     echo
-    timeout "$RUN_CEILING" go run ./tools/fleet run -roster "$ROSTER" -execute 2>&1 || \
-      echo "(run exceeded $RUN_CEILING and was stopped)"
+    rc=0
+    timeout "$RUN_CEILING" go run ./tools/fleet run -roster "$ROSTER" -execute 2>&1 || rc=$?
+    # `|| echo "(run exceeded ...)"` used to sit here, which reported EVERY
+    # non-zero exit as a timeout. The first unattended night died instantly on
+    # "failed to run command 'go': No such file or directory" and the digest
+    # recorded a 90-minute run that never happened. Only 124 is a timeout;
+    # saying so is the difference between a diagnosis and a fiction.
+    case "$rc" in
+    0) ;;
+    124) echo; echo "(run exceeded $RUN_CEILING and was stopped — this IS a timeout)" ;;
+    126 | 127) echo; echo "(could not start, exit $rc: a command was missing or not executable." \
+      "A systemd timer does not get your shell's PATH — reinstall with 'nightly.sh install')" ;;
+    *) echo; echo "(run failed with exit $rc — NOT a timeout; read the log above)" ;;
+    esac
   } | tee "$digest"
 
   echo
