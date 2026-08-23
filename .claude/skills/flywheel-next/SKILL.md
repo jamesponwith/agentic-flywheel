@@ -38,15 +38,24 @@ Register with blackbird before acting (ADR 0004):
   one not — get different keys and therefore **never conflict**, which is the
   failure reservations exist to prevent, silently (fw-wb2.9). Fall back to the
   repo's absolute path only if the variable is unset.
-- Use a **stable** name — `<repo>/builder` — and persist the returned
-  `registration_token` to `$XDG_STATE_HOME/flywheel/<repo>-builder.token`
-  (falling back to `~/.local/state/flywheel/`), then reuse it on every later
-  run. blackbird ties a name to its first token permanently: a run that
-  registers `<repo>/builder` and drops the token **burns that name forever**,
-  and the next run gets `UNAUTHENTICATED`. That already happened once, and the
-  workaround — inventing `<repo>/builder-<bead>` per run — fragments the audit
-  trail one identity at a time (fw-t7d).
-- The token file lives in XDG state, never in the repo or a worktree.
+- **Your identity is already in your environment.** `$FLYWHEEL_BLACKBIRD_AGENT`
+  and `$FLYWHEEL_BLACKBIRD_TOKEN` are set by the spawner. Use them and do not
+  go looking for a token file: the sandbox scopes your reads to the worktree,
+  ADR 0003 forbids you reading secrets, and the file is the coordinator's
+  business. A builder that went looking anyway got `UNAUTHENTICATED`, could
+  not reserve, and correctly refused to edit — stopping the whole run before
+  its first change (fw-eoi).
+- Only when both variables are unset: register with a **stable** name —
+  `<repo>/builder` — and persist the returned `registration_token` to
+  `$XDG_STATE_HOME/flywheel/<repo>-builder.token` (falling back to
+  `~/.local/state/flywheel/`). blackbird ties a name to its first token
+  permanently: a run that registers `<repo>/builder` and drops the token
+  **burns that name forever**, and the next run gets `UNAUTHENTICATED`. That
+  already happened once — the live store holds a `-v2` identity because of it
+  — and the workaround, inventing `<repo>/builder-<bead>` per run, fragments
+  the audit trail one identity at a time (fw-t7d).
+- If you cannot register and cannot reserve, **stop and say so**. Do not edit
+  without a reservation, and do not invent a per-run name to get moving.
 
 ## 2. Claim the work
 
