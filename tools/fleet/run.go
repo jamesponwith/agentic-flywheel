@@ -279,6 +279,18 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// Hand the builder the canonical project_key rather than letting it derive
 	// one. A builder resolving its own path can disagree with the coordinator
 	// under a symlink, and two agents on different keys never conflict.
+	// The builder cannot read its own environment — the sandbox refuses
+	// /proc/self/environ outright ("may expose secrets") and env/printenv are
+	// not allowlisted — so anything it must ACT on has to arrive as a file in
+	// its worktree or as its prompt. Identity still goes in the environment
+	// for anything that shells out, but the run's shape goes in a file the
+	// builder can actually read (fw-k8f).
+	if err := writeRunContext(wt, a, opts); err != nil {
+		b.Outcome, b.Detail = "error", "run context: "+err.Error()
+		b.Took = time.Since(b.Started)
+		return b
+	}
+
 	// withIdentity, because the builder cannot read its own token: the sandbox
 	// scopes reads to the worktree and ADR 0003 forbids agents reading secrets
 	// anyway. The coordinator is under neither constraint, so it hands the
