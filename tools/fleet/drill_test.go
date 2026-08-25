@@ -13,7 +13,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,17 +23,18 @@ import (
 func drillRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	// inDir, not a bare exec.Command. git exports GIT_DIR to its hooks, and a
+	// `git config user.email` that inherits it writes to the REAL repository
+	// rather than to this temp dir — permanently rebranding the maintainer as
+	// the fixture identity "d <d@d>", which GitHub then attributes to a
+	// stranger who happens to own that address. That is what happened here.
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
 		{"config", "user.email", "d@d"}, {"config", "user.name", "d"}} {
-		c := exec.Command("git", a...)
-		c.Dir = dir
-		if out, err := c.CombinedOutput(); err != nil {
+		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
 	}
-	c := exec.Command("git", "commit", "-q", "--allow-empty", "-m", "root")
-	c.Dir = dir
-	_ = c.Run()
+	_ = inDir(dir, "git", "commit", "-q", "--allow-empty", "-m", "root").Run()
 	bdIn(t, dir, "init", "--prefix", "dr", "--non-interactive")
 	return dir
 }
