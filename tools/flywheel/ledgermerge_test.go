@@ -26,58 +26,78 @@ func TestAppendOnlyLedgersMergeAsUnion(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := scratch(t)
-			run := func(args ...string) error {
-				// Hermetic: this package has no inDir, and a bare exec.Command
-				// here would act on the repository running the test — the exact
-				// bug that published 36 commits under a stranger's name.
+			// Every setup step is checked. The first version ignored their
+			// errors, so when one behaved differently on the runner the test
+			// silently exercised nothing and failed in BOTH directions — a
+			// vacuous test, in the test written to catch vacuous tests.
+			git := func(args ...string) string {
+				t.Helper()
 				c := exec.Command("git", args...)
 				c.Dir = dir
 				c.Env = hermeticEnv()
 				out, err := c.CombinedOutput()
-				if err != nil && !strings.Contains(string(out), "CONFLICT") {
-					return err
+				if err != nil {
+					t.Fatalf("git %v: %v\n%s", args, err, out)
 				}
-				return err
+				return string(out)
 			}
 			log := filepath.Join(dir, ".flywheel", "agent-log.jsonl")
 			if err := os.MkdirAll(filepath.Dir(log), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			write := func(path, body string) {
-				if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			write := func(body string) {
+				t.Helper()
+				if err := os.WriteFile(log, []byte(body), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
-			write(log, `{"ts":"2026-01-01T00:00:00Z","event":"base"}`+"\n")
+			const base = `{"ts":"2026-01-01T00:00:00Z","event":"base"}` + "\n"
+
+			write(base)
 			if tc.attributes {
 				b, err := os.ReadFile("../../.gitattributes")
 				if err != nil {
 					t.Skip(".gitattributes not present")
 				}
-				write(filepath.Join(dir, ".gitattributes"), string(b))
-			}
-			for _, a := range [][]string{{"config", "user.email", "fixture@fleet.invalid"},
-				{"config", "user.name", "fixture"}, {"add", "-A"}, {"commit", "-qm", "base"},
-				{"checkout", "-q", "-b", "feature"}} {
-				if err := run(a...); err != nil {
-					t.Fatalf("git %v: %v", a, err)
+				if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), b, 0o644); err != nil {
+					t.Fatal(err)
 				}
 			}
-			write(log, `{"ts":"2026-01-01T00:00:00Z","event":"base"}`+"\n"+
-				`{"ts":"2026-01-02T00:00:00Z","event":"from-branch"}`+"\n")
-			_ = run("commit", "-qam", "branch")
-			_ = run("checkout", "-q", "main")
-			write(log, `{"ts":"2026-01-01T00:00:00Z","event":"base"}`+"\n"+
-				`{"ts":"2026-01-03T00:00:00Z","event":"from-main"}`+"\n")
-			_ = run("commit", "-qam", "main")
+			git("config", "user.email", "fixture@fleet.invalid")
+			git("config", "user.name", "fixture")
+			git("add", "-A")
+			git("commit", "-qm", "base")
+			root := strings.TrimSpace(git("rev-parse", "HEAD"))
 
-			err := run("merge", "-q", "--no-edit", "feature")
+			git("checkout", "-q", "-b", "feature")
+			write(base + `{"ts":"2026-01-02T00:00:00Z","event":"from-branch"}` + "\n")
+			git("commit", "-qam", "branch")
+			feature := strings.TrimSpace(git("rev-parse", "HEAD"))
+
+			git("checkout", "-q", "main")
+			write(base + `{"ts":"2026-01-03T00:00:00Z","event":"from-main"}` + "\n")
+			git("commit", "-qam", "main")
+			mainTip := strings.TrimSpace(git("rev-parse", "HEAD"))
+
+			// Assert the fixture actually diverged. Without this, a merge that
+			// fast-forwards proves nothing and reads as a pass.
+			if feature == mainTip || feature == root || mainTip == root {
+				t.Fatalf("fixture did not diverge: root=%s feature=%s main=%s", root, feature, mainTip)
+			}
+
+			c := exec.Command("git", "merge", "-q", "--no-edit", "feature")
+			c.Dir = dir
+			c.Env = hermeticEnv()
+			out, err := c.CombinedOutput()
 			merged := err == nil
 			if merged != tc.wantMerge {
-				t.Fatalf("merged = %v, want %v", merged, tc.wantMerge)
+				t.Fatalf("merged = %v, want %v\n%s", merged, tc.wantMerge, out)
 			}
 			if !merged {
-				return // the control case; nothing more to assert
+				if !strings.Contains(string(out), "CONFLICT") {
+					t.Errorf("failed for some reason other than a conflict:\n%s", out)
+				}
+				return
 			}
 			body, err := os.ReadFile(log)
 			if err != nil {
