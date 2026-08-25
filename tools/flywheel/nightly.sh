@@ -52,9 +52,18 @@ UNIT
 run)
   # The kill switch outranks the schedule. Checked before anything else, so
   # stopping the fleet never requires disabling a timer.
-  if ! tools/flywheel/guard.sh check; then
-    echo "nightly: halted by the kill switch"; exit 0
-  fi
+  # Exit 1 is "stopped", and only exit 1. Anything else means guard.sh could
+  # not reach a verdict — a broken PATH, a missing file, a syntax error — and
+  # reporting that as a deliberate halt while exiting 0 turns an outage into a
+  # clean night. Found by a test whose PATH was too small to run guard.sh at
+  # all, which then reported the kill switch as set on a repo where it wasn't.
+  gc=0; tools/flywheel/guard.sh check || gc=$?
+  case "$gc" in
+  0) ;;
+  1) echo "nightly: halted by the kill switch"; exit 0 ;;
+  *) echo "nightly: guard.sh could not answer (exit $gc) — refusing to run agents" >&2
+     exit "$gc" ;;
+  esac
   # A timer's PATH is not a login shell's. Fail here, by name, rather than
   # inside a subprocess whose error the digest will paraphrase.
   for need in go git; do
