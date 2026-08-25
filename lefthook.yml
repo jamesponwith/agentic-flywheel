@@ -23,6 +23,23 @@ pre-commit:
             tools/flywheel/guard.sh log gate.skipped reason="$f" 2>/dev/null || true
           fi
         done
+    # A test helper that shelled out to git without a hermetic env rewrote this
+    # repository's own user.email to the fixture value "d@d" — GitHub resolves
+    # that address to an unrelated account, so 27 commits were published under
+    # a stranger's name before anyone noticed. Squash-merge happened to
+    # sanitise main, which is luck, not a control.
+    #
+    # A fixture address has no dot in its domain. Real ones do.
+    identity:
+      run: |
+        email=$(git config user.email 2>/dev/null || true)
+        case "${email#*@}" in
+        *.*) ;;
+        *) echo "pre-commit: refusing to commit as '${email:-<unset>}' — that is a test"
+           echo "  fixture identity, not yours. A non-hermetic test helper writes it into"
+           echo "  .git/config. Fix with: git config --local --unset user.email"
+           exit 1 ;;
+        esac
     gofmt:
       run: test -z "$(gofmt -l .)" || { echo "unformatted:"; gofmt -l .; exit 1; }
     vet:
