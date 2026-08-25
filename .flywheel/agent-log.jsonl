@@ -50,4 +50,5 @@
 {"ts":"2026-08-21T22:22:15Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-ax2","usd":"2.3992","tokens":"2367629","turns":"63"}
 {"ts":"2026-08-20T22:28:25Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-dov","bead":"fw-dov"}
 {"ts":"2026-08-20T22:28:25Z","event":"bead.gate_green","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-dov","bead":"fw-dov"}
+{"ts":"2026-08-23T14:24:36Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-ax2","usd":"2.5089","tokens":"2338774","turns":"54"}
 {"ts":"2026-08-21T23:05:26Z","event":"audit.probe","agent":"audit/probe","repo":"agentic-flywheel","note":"mirror-test"}
