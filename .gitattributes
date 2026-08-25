@@ -1,7 +1,10 @@
-# Append-only agent logs: parallel agents append, never rewrite. Union-merge
-# so two agents' nightly records combine instead of conflicting.
+# The audit log and the review ledger are append-only JSONL: every line is one
+# record carrying its own timestamp, and two branches that each appended are
+# both telling the truth. Git's default merge treats that as a conflict, so
+# every branch collided with every merge — three times in one afternoon, and
+# each manual resolution was a chance to drop a record by picking a side.
+#
+# union keeps both sides' lines. It is the one case where "take everything" is
+# not laziness but the correct semantics.
 .flywheel/agent-log.jsonl merge=union
-
-# The review ledger is appended by every reviewer, never rewritten. Same
-# reasoning as the agent log above: two reviews combine, they do not conflict.
-.flywheel/review.jsonl merge=union
+.flywheel/review.jsonl    merge=union
