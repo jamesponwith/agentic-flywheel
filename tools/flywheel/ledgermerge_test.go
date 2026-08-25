@@ -68,13 +68,20 @@ func TestAppendOnlyLedgersMergeAsUnion(t *testing.T) {
 			git("add", "-A")
 			git("commit", "-qm", "base")
 			root := strings.TrimSpace(git("rev-parse", "HEAD"))
+			// Capture the default branch rather than assuming "main". scratch()
+			// runs `git init` with no -b, so the name comes from the host's
+			// init.defaultBranch — "main" here, something else on the runner,
+			// where `checkout main` failed with exit 1. Same class as the two
+			// PATH assumptions today: a fixture that only holds where it was
+			// written.
+			trunk := strings.TrimSpace(git("rev-parse", "--abbrev-ref", "HEAD"))
 
 			git("checkout", "-q", "-b", "feature")
 			write(base + `{"ts":"2026-01-02T00:00:00Z","event":"from-branch"}` + "\n")
 			git("commit", "-qam", "branch")
 			feature := strings.TrimSpace(git("rev-parse", "HEAD"))
 
-			git("checkout", "-q", "main")
+			git("checkout", "-q", trunk)
 			write(base + `{"ts":"2026-01-03T00:00:00Z","event":"from-main"}` + "\n")
 			git("commit", "-qam", "main")
 			mainTip := strings.TrimSpace(git("rev-parse", "HEAD"))
