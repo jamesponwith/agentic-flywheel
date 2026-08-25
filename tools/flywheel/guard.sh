@@ -34,6 +34,20 @@ case "$_common" in
 esac
 REPO_STATE="$REPO_DIR/.flywheel"
 LOG="$REPO_STATE/agent-log.jsonl"
+
+# The ledger is also mirrored outside the working tree, because inside it the
+# word "append-only" is not true. .flywheel/agent-log.jsonl is a tracked file,
+# so `git checkout --`, `git reset --hard` and `git stash` all revert it like
+# any other — and each of those is an ordinary thing to run while cleaning up.
+# It happened twice in one session: once clearing test pollution, once syncing
+# to origin, and both times the only genuine cost records went with it. Evidence
+# that a routine command can erase is not evidence.
+#
+# The mirror is authoritative for recovery; the in-repo copy stays the shared,
+# reviewable artifact. Under XDG state next to the builder identities, which is
+# already the place for things git must not own.
+MIRROR_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/flywheel/ledger"
+MIRROR="$MIRROR_DIR/$(basename "$REPO_DIR")-agent-log.jsonl"
 LEDGER="$REPO_STATE/review.jsonl"
 
 usage() {
@@ -45,6 +59,7 @@ usage: guard.sh <command>
   stop --fleet [r]   stop every agent in every repo
   resume [--fleet]   clear the corresponding stop file
   log <event> [k=v]  append an audit record ($FLYWHEEL_AGENT names the agent)
+  restore-log        merge the out-of-tree mirror back into .flywheel/
   finding [k=v]      append a review finding to the review ledger
   status             show stop state and recent activity
 USAGE
@@ -146,10 +161,44 @@ cmd_log() {
   local fields
   fields=$(json_pairs "$log_reserved" "$@") || return 2
   mkdir -p "$REPO_STATE"
-  printf '{"ts":"%s","event":"%s","agent":"%s","repo":"%s"%s}\n' \
+  local record
+  record=$(printf '{"ts":"%s","event":"%s","agent":"%s","repo":"%s"%s}' \
     "$(date -u +%FT%TZ)" "$(json_escape "$event")" \
     "$(json_escape "$(agent_name)")" "$(json_escape "$(basename "$REPO_DIR")")" \
-    "$fields" >> "$LOG"
+    "$fields")
+  printf '%s\n' "$record" >> "$LOG"
+  # Mirror second and never fail the caller on it: a record that reached the
+  # repo is already recorded, and losing the durable copy must not look like
+  # losing the event.
+  if mkdir -p "$MIRROR_DIR" 2>/dev/null; then
+    printf '%s\n' "$record" >> "$MIRROR" 2>/dev/null || true
+  fi
+}
+
+# restore-log — merge the out-of-tree mirror back into the repo copy.
+#
+# Union, not overwrite. The in-repo copy may hold records the mirror never saw
+# (it predates the mirror), and the point is to lose nothing in either
+# direction. sort -u over whole records is enough: each line carries its own
+# ts, so two identical lines ARE the same event, and ordering by that leading
+# field falls out of a plain lexicographic sort.
+cmd_restore_log() {
+  if [ ! -f "$MIRROR" ]; then
+    echo "no mirror at $MIRROR" >&2; return 1
+  fi
+  mkdir -p "$REPO_STATE"; : >> "$LOG"
+  local before merged
+  # `|| echo 0` is wrong here: grep -c PRINTS 0 and then exits 1 on no match,
+  # so the substitution captured "0", the echo appended another, and the
+  # message came out as "restored: 0\n0 -> 2 records". Under set -e the bare
+  # grep would abort instead, so it needs `|| :` rather than nothing.
+  before=$(grep -c . "$LOG" 2>/dev/null || :)
+  before=${before:-0}
+  merged=$(mktemp)
+  cat "$LOG" "$MIRROR" | grep -v '^[[:space:]]*$' | sort -u > "$merged"
+  mv "$merged" "$LOG"
+  after=$(grep -c . "$LOG" 2>/dev/null || :)
+  echo "restored: $before -> ${after:-0} records"
 }
 
 # finding — append one review finding to .flywheel/review.jsonl.
@@ -189,6 +238,7 @@ case "${1:-}" in
   resume) shift; cmd_resume "$@" ;;
   log)    shift; cmd_log "$@" ;;
   finding) shift; cmd_finding "$@" ;;
+  restore-log) shift; cmd_restore_log ;;
   status) shift; cmd_status ;;
   *)      usage; exit 2 ;;
 esac
