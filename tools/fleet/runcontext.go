@@ -28,25 +28,33 @@ import (
 type RunContext struct {
 	Bead string `json:"bead"`
 	Repo string `json:"repo"`
-	// Solo is true when this builder is the only one that can be running.
-	// Territory reservations exist to stop two agents editing the same file;
-	// with a single builder there is no second agent, so requiring one buys
-	// no safety and has cost every run so far. When concurrency rises the
-	// requirement comes back on its own — this is a fact about the run, not a
-	// switch someone remembered to flip.
+	// Solo is true when this builder is the only one that can be running IN
+	// THIS REPO. That is the bound reservations actually care about: blackbird
+	// keys them by project_key, so two builders in different repos cannot
+	// collide however many of them there are. Serialising per repo therefore
+	// lets the fleet widen across repos without re-arming a requirement that
+	// has cost three runs and bought no conflict (fw-k8f).
+	//
+	// Derived, never configured. Raising builders-per-repo above one brings
+	// the requirement back by itself.
 	Solo bool `json:"solo"`
-	// ConcurrentBuilders is the cap Solo was derived from, so a reader can
-	// check the reasoning rather than trust the flag.
-	ConcurrentBuilders int `json:"concurrent_builders"`
+	// BuildersInThisRepo is what Solo was derived from, so a reader can check
+	// the reasoning rather than trust the flag.
+	BuildersInThisRepo int `json:"builders_in_this_repo"`
+	// FleetWidth is how many builders may run at once across all repos. It
+	// does not affect Solo and is here so a report can say what the run's
+	// shape was.
+	FleetWidth int `json:"fleet_width"`
 }
 
 // writeRunContext drops the context into the worktree's .flywheel directory.
-func writeRunContext(worktree string, a Assignment, opts RunOpts) error {
+func writeRunContext(worktree string, a Assignment, opts RunOpts, buildersHere, width int) error {
 	rc := RunContext{
 		Bead:               a.Bead,
 		Repo:               a.Repo,
-		Solo:               opts.Concurrency <= 1,
-		ConcurrentBuilders: opts.Concurrency,
+		Solo:               buildersHere <= 1,
+		BuildersInThisRepo: buildersHere,
+		FleetWidth:         width,
 	}
 	dir := filepath.Join(worktree, ".flywheel")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

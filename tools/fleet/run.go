@@ -61,8 +61,15 @@ type RunOpts struct {
 	MaxTurns int
 
 	Concurrency int
-	LogDir      string
-	Runner      Runner // how to invoke an agent (ADR 0010)
+	// BuildersPerRepo is how many builders may work one repo at once. One,
+	// always, today: it is what keeps every builder solo in its own repo and
+	// therefore free of the reservation requirement. Carried explicitly so the
+	// run context can state the reasoning rather than imply it.
+	BuildersPerRepo int
+	// FleetWidth is set by Run from the workload; reported, never configured.
+	FleetWidth int
+	LogDir     string
+	Runner     Runner // how to invoke an agent (ADR 0010)
 }
 
 func DefaultRunOpts() RunOpts {
@@ -83,8 +90,37 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 		return nil, err
 	}
 
+	// Concurrency follows the workload, bounded two ways.
+	//
+	// Globally by the cap, because every builder draws on ONE account quota —
+	// two of them emptied a session window in 29 minutes. And per repo by
+	// exactly one, which is the bound that matters: territory reservations
+	// exist to stop two agents editing the same file, and two builders in
+	// DIFFERENT repos cannot collide because blackbird keys reservations by
+	// project_key. Serialising per repo makes every builder solo in its own
+	// repo, so the fleet can widen across repos without re-arming the
+	// reservation requirement that cost three runs (fw-k8f).
+	//
+	// Spawning more builders than there is work is pure startup cost, so the
+	// effective width is the number of distinct repos with work.
+	repos := map[string]bool{}
+	for _, a := range plan.Assignments {
+		repos[a.Repo] = true
+	}
+	width := fleetWidth(plan.Assignments, opts.Concurrency)
+	opts.FleetWidth = width
+	if opts.BuildersPerRepo < 1 {
+		opts.BuildersPerRepo = 1
+	}
+
 	out := make([]Builder, len(plan.Assignments))
-	sem := make(chan struct{}, opts.Concurrency)
+	sem := make(chan struct{}, width)
+	// One slot per repo. Held for the whole build, so a second bead in the
+	// same repo waits rather than racing the first one's worktree.
+	repoSlot := map[string]chan struct{}{}
+	for name := range repos {
+		repoSlot[name] = make(chan struct{}, 1)
+	}
 	var wg sync.WaitGroup
 
 	// A 429 is the account's quota, not this bead's problem: every builder
@@ -121,6 +157,10 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if slot, ok := repoSlot[a.Repo]; ok {
+				slot <- struct{}{}
+				defer func() { <-slot }()
+			}
 
 			b := Builder{Bead: a.Bead, Repo: a.Repo, Agent: a.Agent, Started: time.Now()}
 			repo, ok := r.Repo(a.Repo)
@@ -285,7 +325,7 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 	// its worktree or as its prompt. Identity still goes in the environment
 	// for anything that shells out, but the run's shape goes in a file the
 	// builder can actually read (fw-k8f).
-	if err := writeRunContext(wt, a, opts); err != nil {
+	if err := writeRunContext(wt, a, opts, opts.BuildersPerRepo, opts.FleetWidth); err != nil {
 		b.Outcome, b.Detail = "error", "run context: "+err.Error()
 		b.Took = time.Since(b.Started)
 		return b
@@ -522,4 +562,26 @@ func clearEmptyBranch(repoPath, base, branch string) error {
 		return fmt.Errorf("worktree: could not clear the empty leftover %s: %w", branch, err)
 	}
 	return nil
+}
+
+// fleetWidth is how many builders to run at once: as many as there are repos
+// with work, never more than the ceiling, never fewer than one.
+//
+// The ceiling bounds the account's quota — every builder draws on one session
+// window, and two of them emptied it in 29 minutes. The workload does the
+// sizing, because a builder spawned where there is nothing to do still pays
+// full startup, which is what the last three runs spent to reach a wall.
+func fleetWidth(as []Assignment, ceiling int) int {
+	repos := map[string]bool{}
+	for _, a := range as {
+		repos[a.Repo] = true
+	}
+	w := len(repos)
+	if ceiling > 0 && w > ceiling {
+		w = ceiling
+	}
+	if w < 1 {
+		w = 1
+	}
+	return w
 }
