@@ -26,10 +26,12 @@ func drillRepo(t *testing.T) string {
 	// inDir, not a bare exec.Command. git exports GIT_DIR to its hooks, and a
 	// `git config user.email` that inherits it writes to the REAL repository
 	// rather than to this temp dir — permanently rebranding the maintainer as
-	// the fixture identity "d <d@d>", which GitHub then attributes to a
-	// stranger who happens to own that address. That is what happened here.
+	// the fixture identity. That is what happened here, and because the fixture
+	// was "d@d" back then, GitHub attributed the commits to the stranger who
+	// owns that address. The domain is the reserved TLD "invalid" now, so a
+	// leak through some other hole attributes to nobody (fw-0rf).
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
-		{"config", "user.email", "d@d"}, {"config", "user.name", "d"}} {
+		{"config", "user.email", "d@invalid"}, {"config", "user.name", "d"}} {
 		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
