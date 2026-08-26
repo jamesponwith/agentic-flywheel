@@ -631,7 +631,15 @@ func doReviewRate(rosterPath, repoName string, asJSON bool) error {
 		}
 		return unread
 	}
-	fmt.Printf("review findings, by repo (self-agreement needs %d judged; reviewer precision needs judged_by (fw-bu2))\n\n", minSample)
+	// The taxonomy is stated once, here, rather than repeated on every row.
+	// Without it "judge unrecorded" reads as a data-quality nit instead of the
+	// reason there is no precision figure.
+	fmt.Printf("review findings, by repo. A finding is counted by who judged it, not just by\n"+
+		"who raised it (fw-bu2): precision is accepted/(accepted+rejected) over findings\n"+
+		"whose ledger line names a judge OTHER than the agent that raised them, and each\n"+
+		"class needs %d judged findings of its own before anything is divided. A line that\n"+
+		"records no judge proves neither, so it is counted apart rather than assumed\n"+
+		"independent — which is every line written before guard.sh stamped attribution.\n\n", minSample)
 	for _, rt := range rates {
 		fmt.Println(rt)
 	}
@@ -644,12 +652,26 @@ func doReviewRate(rosterPath, repoName string, asJSON bool) error {
 	case unreadable > 0:
 		fmt.Printf("\n%d ledger(s) could not be read (see warnings above). What the reviewer caught"+
 			" in those repos is unknown, which is not the same as nothing.\n", unreadable)
-	case total.Total == 0:
+	case total.All.Total == 0:
 		fmt.Println("\nNo repo has recorded a review finding. This is an unreviewed fleet" +
 			" rather than a clean one (fw-dov).")
-	case !total.Measurable:
+	case total.Independent.Total == 0:
+		// The state the fleet is actually in, and the one worth spelling out.
+		// "No precision reported: none recorded" is true and tells a reader
+		// nothing about what is missing or how to supply it.
+		fmt.Printf("\nNo precision reported: nothing in the ledger was judged by an agent other than\n"+
+			"the one that raised it. %d judged finding(s) are on record, and what they measure is a\n"+
+			"reviewer agreeing with itself — ADR 0013 runs the panel inside the builder's own loop,\n"+
+			"so that is the expected shape, not a fault. Pass judged_by= to `guard.sh finding` when\n"+
+			"someone else makes the call; judged_by=self records that nobody did.\n",
+			total.All.Accepted+total.All.Rejected)
+	case !total.Independent.Measurable:
+		// Keyed off Independent, not All: a fleet whose self-agreement cleared
+		// the floor still has no precision to report, and saying nothing here
+		// would leave the reader to assume the headline number was one.
 		fmt.Printf("\nNo precision reported: %s.\nIgnored findings stay out of the denominator on purpose"+
-			" — nobody judged them, so they say nothing about whether the reviewer was right.\n", total.Why)
+			" — nobody judged them, so they say nothing about whether the reviewer was right.\n",
+			total.Independent.Why)
 	}
 	return unread
 }

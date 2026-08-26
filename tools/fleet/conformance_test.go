@@ -215,22 +215,33 @@ func TestConformanceReviewLedgerRoundTrip(t *testing.T) {
 	for _, disposition := range []string{"accepted", "rejected", "ignored"} {
 		cmd := exec.Command(guard, "finding",
 			"lens=correctness", "file=tools/fleet/reviewrate.go", "line=42",
-			"severity=medium", "claim="+claim, "disposition="+disposition)
+			"severity=medium", "claim="+claim, "disposition="+disposition,
+			"judged_by=self")
 		cmd.Dir = dir
 		cmd.Env = append(hermeticEnv(), "FLYWHEEL_AGENT=conformance/builder")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("guard.sh finding %s: %v\n%s", disposition, err, out)
 		}
 	}
+	// One more judged by somebody else, so the class split is exercised
+	// against the real writer rather than only against Go fixtures.
+	cmd := exec.Command(guard, "finding",
+		"lens=security", "file=a.go", "line=1", "severity=high",
+		"claim=judged by a human", "disposition=accepted", "judged_by=james")
+	cmd.Dir = dir
+	cmd.Env = append(hermeticEnv(), "FLYWHEEL_AGENT=conformance/builder")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("guard.sh finding judged_by=james: %v\n%s", err, out)
+	}
 
 	fs, err := readLedger(filepath.Join(dir, ".flywheel", "review.jsonl"))
 	if err != nil {
 		t.Fatalf("readLedger on a guard.sh-written ledger: %v", err)
 	}
-	if len(fs) != 3 {
-		t.Fatalf("read %d finding(s) of 3 — the parser does not match the writer", len(fs))
+	if len(fs) != 4 {
+		t.Fatalf("read %d finding(s) of 4 — the parser does not match the writer", len(fs))
 	}
-	for _, f := range fs {
+	for _, f := range fs[:3] {
 		if f.Claim != claim {
 			t.Errorf("claim round-tripped as %q, want %q", f.Claim, claim)
 		}
@@ -239,17 +250,36 @@ func TestConformanceReviewLedgerRoundTrip(t *testing.T) {
 		if f.TS == "" || f.Commit == "" || f.Branch == "" || f.Repo == "" {
 			t.Errorf("guard.sh-stamped fields missing: %+v", f)
 		}
+		if f.Agent != "conformance/builder" {
+			t.Errorf("agent = %q, want the running agent stamped by guard.sh", f.Agent)
+		}
+		// judged_by=self must reach the ledger as a real name. Stored as the
+		// literal "self" it would be ambiguous the moment a second agent
+		// appends, and every reader would need to learn the sentinel.
+		if f.JudgedBy != "conformance/builder" {
+			t.Errorf("judged_by = %q, want judged_by=self expanded to the agent's name", f.JudgedBy)
+		}
+		if f.class() != selfJudged {
+			t.Errorf("finding raised and judged by one agent classed as %d, want selfJudged", f.class())
+		}
 		if f.Severity != "medium" || f.Line != "42" {
 			t.Errorf("finding = %+v, want severity medium and line 42", f)
 		}
 	}
+	if got := fs[3]; got.JudgedBy != "james" || got.class() != independent {
+		t.Errorf("finding judged by another party = %+v, class %d; want judged_by james and independent", got, got.class())
+	}
 
 	r := rate(fs)
-	if r.Accepted != 1 || r.Rejected != 1 || r.Ignored != 1 || r.Total != 3 {
-		t.Errorf("rate = %+v, want 1/1/1 of 3", r)
+	if r.All.Accepted != 2 || r.All.Rejected != 1 || r.All.Ignored != 1 || r.All.Total != 4 {
+		t.Errorf("All = %+v, want 2 accepted, 1 rejected, 1 ignored of 4", r.All)
 	}
-	if r.Measurable {
-		t.Errorf("measured a precision from 2 judged findings: %+v", r)
+	if r.Self.Total != 3 || r.Independent.Total != 1 || r.Unrecorded.Total != 0 {
+		t.Errorf("self/independent/unrecorded = %d/%d/%d, want 3/1/0",
+			r.Self.Total, r.Independent.Total, r.Unrecorded.Total)
+	}
+	if r.All.Measurable || r.Independent.Measurable || r.Self.Measurable {
+		t.Errorf("measured a rate from a handful of judged findings: %+v", r)
 	}
 }
 
