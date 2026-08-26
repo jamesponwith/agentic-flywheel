@@ -61,6 +61,7 @@ usage: guard.sh <command>
   log <event> [k=v]  append an audit record ($FLYWHEEL_AGENT names the agent)
   restore-log        merge the out-of-tree mirror back into .flywheel/
   finding [k=v]      append a review finding to the review ledger
+                     (who raised it is stamped; pass judged_by=<name|self>)
   status             show stop state and recent activity
 USAGE
 }
@@ -113,7 +114,7 @@ cmd_resume() {
 # and either way a log that misstates who acted. ADR 0003 makes this the record
 # of what unattended agents did, so a bad pair is refused, never guessed at.
 log_reserved="ts event agent repo"
-finding_reserved="ts commit branch repo"
+finding_reserved="ts commit branch repo agent"
 
 # ponytail: the five escapes JSON needs from shell-sourced text. Other control
 # characters (0x00-0x1f) would still produce an invalid record; covering them
@@ -208,16 +209,52 @@ cmd_restore_log() {
 # (accepted | rejected | ignored) and, once Learn v2 lands, an escape verdict —
 # did anything the reviewer missed turn up in CI or production?
 #
-# Expected keys: lens, file, line, severity, claim, disposition.
+# Expected keys: lens, file, line, severity, claim, disposition, judged_by.
+#
+# Two attributions, because they answer different questions and the ledger used
+# to carry neither (fw-bu2). `agent` names who RAISED the finding and is
+# stamped here rather than passed, for the reason cmd_log stamps it: a
+# caller-supplied attribution is the spoofing path fw-7mw closed. `judged_by`
+# names who made the disposition call and IS passed, because the judge is often
+# not the author of the line — a finding re-dispositioned later is recorded by
+# appending, since the ledger is never rewritten.
+#
+# An absent judged_by means nobody recorded who judged, which is not the same as
+# nobody judging and must never be read as an independent judgement.
 cmd_finding() {
+  # judged_by=self is shorthand for "whoever raised this also judged it", and it
+  # exists because an agent cannot read its own name: procfs is a hard sandbox
+  # refusal and env/printenv are outside the allowlist (fw-eoi, fw-k8f), so
+  # interpolating $FLYWHEEL_AGENT into the call is not something a builder can
+  # write. Expanded at write time so the ledger stores a real name and every
+  # reader compares two names rather than learning a sentinel.
+  local kv i n=$#
+  for ((i = 0; i < n; i++)); do
+    kv=$1; shift
+    [ "$kv" = "judged_by=self" ] && kv="judged_by=$(agent_name)"
+    set -- "$@" "$kv"
+  done
   local fields
   fields=$(json_pairs "$finding_reserved" "$@") || return 2
   mkdir -p "$REPO_STATE"
-  printf '{"ts":"%s","commit":"%s","branch":"%s","repo":"%s"%s}\n' \
+  # `x=$(cmd) || x=unknown`, not `$(cmd || echo unknown)`. In a repo with no
+  # commits `rev-parse --abbrev-ref HEAD` prints "HEAD" AND exits non-zero, so
+  # the inline form appended the fallback to the output and stamped a branch of
+  # "HEAD\nunknown" — a raw newline inside a JSON string, which split the record
+  # in two and made readLedger skip both halves. A finding lost that way is
+  # indistinguishable from one never recorded, which is the failure this ledger
+  # exists to prevent. Assigning on failure discards the partial output instead.
+  local commit branch
+  commit=$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null) || commit=unknown
+  branch=$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null) || branch=unknown
+  # The stamped fields go through json_escape like cmd_log's do. They were the
+  # only values in either writer reaching the record unescaped, and a repo
+  # directory or ref name is no more trustworthy than a caller's k=v.
+  printf '{"ts":"%s","commit":"%s","branch":"%s","repo":"%s","agent":"%s"%s}\n' \
     "$(date -u +%FT%TZ)" \
-    "$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
-    "$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)" \
-    "$(basename "$REPO_DIR")" "$fields" >> "$LEDGER"
+    "$(json_escape "${commit:-unknown}")" "$(json_escape "${branch:-unknown}")" \
+    "$(json_escape "$(basename "$REPO_DIR")")" "$(json_escape "$(agent_name)")" \
+    "$fields" >> "$LEDGER"
 }
 
 cmd_status() {

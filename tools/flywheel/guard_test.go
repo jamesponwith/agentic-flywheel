@@ -157,6 +157,10 @@ func TestRefusesBadPairs(t *testing.T) {
 		{"log empty key", []string{"log", "e", "=v"}, "agent-log.jsonl", "empty key"},
 		{"finding reserved commit", []string{"finding", "commit=x"}, "review.jsonl", "written automatically"},
 		{"finding reserved branch", []string{"finding", "branch=x"}, "review.jsonl", "written automatically"},
+		// A caller-supplied agent on a finding is the same spoofing path
+		// fw-7mw closed on log: it names who raised the finding, and
+		// review-rate divides on whether that differs from who judged it.
+		{"finding reserved agent", []string{"finding", "agent=x"}, "review.jsonl", "set FLYWHEEL_AGENT instead"},
 		{"finding missing equals", []string{"finding", "lens"}, "review.jsonl", "is not key=value"},
 	}
 	for _, tt := range tests {
@@ -212,6 +216,95 @@ func TestLogWritesEachFieldOnce(t *testing.T) {
 	}
 	if rec["event"] != "bead.pr_opened" || rec["bead"] != "fw-ldz" {
 		t.Errorf("record = %v", rec)
+	}
+}
+
+// A finding carries two attributions: who raised it, stamped here, and who
+// judged it, passed by the caller. review-rate divides on whether they differ,
+// so both have to survive the write intact (fw-bu2).
+//
+// scratch() is a repo with no commits, which is not incidental: that is the
+// state in which rev-parse prints "HEAD" and still fails, and the record used
+// to come out split across two lines because of it. Asserting one parseable
+// line here is the regression test for that as well.
+func TestFindingRecordsWhoRaisedAndWhoJudged(t *testing.T) {
+	tests := []struct {
+		name         string
+		agent        string
+		args         []string
+		wantAgent    string
+		wantJudgedBy string // "" means the key must be absent
+	}{
+		{
+			// The common case under ADR 0013: the panel runs in the builder's
+			// own loop, so one agent raises and judges. judged_by=self is how
+			// it says so — an agent cannot read its own name to interpolate it.
+			name:  "judged_by=self expands to the raising agent",
+			agent: "r/builder", args: []string{"judged_by=self"},
+			wantAgent: "r/builder", wantJudgedBy: "r/builder",
+		},
+		{
+			name:  "a named judge is recorded as given",
+			agent: "r/builder", args: []string{"judged_by=james"},
+			wantAgent: "r/builder", wantJudgedBy: "james",
+		},
+		{
+			// The pre-fw-bu2 call shape. It must stay legal and must leave
+			// judged_by absent: writing the raiser in would be the manufactured
+			// attribution this whole change exists to avoid.
+			name:  "no judged_by leaves the field absent, not guessed",
+			agent: "r/builder", args: nil,
+			wantAgent: "r/builder", wantJudgedBy: "",
+		},
+		{
+			// Both sides resolve to "unknown", which review-rate reads as
+			// nobody rather than as the same agent twice.
+			name:  "an unresolvable agent expands self to unknown",
+			agent: "", args: []string{"judged_by=self"},
+			wantAgent: "unknown", wantJudgedBy: "unknown",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := scratch(t)
+			args := append([]string{"finding", "lens=correctness", "severity=low",
+				"claim=a claim", "disposition=accepted"}, tt.args...)
+			if stderr, code := runGuard(t, dir, tt.agent, args...); code != 0 {
+				t.Fatalf("exit %d; want 0: %s", code, stderr)
+			}
+			lines := readLines(t, filepath.Join(dir, ".flywheel", "review.jsonl"))
+			if len(lines) != 1 {
+				t.Fatalf("got %d lines, want 1: %q", len(lines), lines)
+			}
+			// Read the token stream, not a map: a duplicated key is last-wins
+			// under encoding/json and that is exactly what hid fw-7mw.
+			seen := map[string]int{}
+			for _, k := range jsonTopKeys(t, lines[0]) {
+				seen[k]++
+			}
+			for k, n := range seen {
+				if n != 1 {
+					t.Errorf("key %q appears %d times; every field must appear exactly once", k, n)
+				}
+			}
+			var rec map[string]string
+			if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+				t.Fatalf("unparseable finding %q: %v", lines[0], err)
+			}
+			if rec["agent"] != tt.wantAgent {
+				t.Errorf("agent = %q, want %q", rec["agent"], tt.wantAgent)
+			}
+			if tt.wantJudgedBy == "" {
+				if _, ok := rec["judged_by"]; ok {
+					t.Errorf("judged_by = %q on a call that named no judge", rec["judged_by"])
+				}
+			} else if rec["judged_by"] != tt.wantJudgedBy {
+				t.Errorf("judged_by = %q, want %q", rec["judged_by"], tt.wantJudgedBy)
+			}
+			if rec["disposition"] != "accepted" || rec["claim"] != "a claim" {
+				t.Errorf("rewriting the args lost a caller field: %v", rec)
+			}
+		})
 	}
 }
 
