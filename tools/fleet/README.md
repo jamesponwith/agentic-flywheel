@@ -111,8 +111,8 @@ was already on disk, unread. Every `guard.sh finding` appends a line to
 `.flywheel/review.jsonl` carrying a disposition; nothing but `wc -l` had ever
 looked at it.
 
-Two refusals do the work, and both are about declining to manufacture a number
-that flatters the reviewer:
+Three refusals do the work, and all three are about declining to manufacture a
+number that flatters the reviewer:
 
 - **`ignored` is not `rejected`.** A finding nobody judged is not a finding
   judged wrong. Precision divides accepted by *accepted + rejected* only;
@@ -123,6 +123,10 @@ that flatters the reviewer:
   distinguishes zero spend from unmeasured spend. An unmeasurable rate that
   renders as `0%` reads as "the reviewer is always wrong", which the ledger
   does not say.
+- **A reviewer agreeing with itself is not precision.** ADR 0013 runs the
+  panel inside the builder's own loop, so almost every finding is raised and
+  dispositioned by one agent in one run. That figure is real and it is not what
+  "precision" means to anyone reading a dashboard.
 
 A disposition outside the three known values is counted in the total and in no
 bucket, and the gap is printed rather than folded into `ignored` — that would
@@ -130,8 +134,47 @@ be the same error one layer down. A missing ledger is "no reviews recorded"; a
 ledger that exists and cannot be read is an **error**, because that is a broken
 thing pretending to be an empty one.
 
-Today it reports the honest answer: no precision yet. The number arrives when
-the ledger does.
+### Who judged it, not just who raised it
+
+Findings are counted in three classes, and only one of them is precision:
+
+| class | the ledger line says | rendered as |
+| --- | --- | --- |
+| independent | a `judged_by` naming someone other than `agent` | **precision** |
+| self-judged | `judged_by` equal to `agent` | self-agreement |
+| judge unrecorded | no `judged_by`, or no `agent` | agreement, unlabelled |
+
+`guard.sh finding` stamps `agent` — who raised it — and refuses a caller-supplied
+one, for the reason it refuses a caller-supplied `agent` on `log`. The judge is
+passed:
+
+```
+tools/flywheel/guard.sh finding lens=correctness file=a.go line=1 \
+  severity=high claim="..." disposition=accepted judged_by=self
+```
+
+`judged_by=self` expands to the running agent's name at write time. It exists
+because an agent cannot read its own name — procfs is a hard sandbox refusal and
+`env`/`printenv` are outside the allowlist (fw-eoi, fw-k8f) — so interpolating
+`$FLYWHEEL_AGENT` into the call is not something a builder can write. Storing
+the expanded name keeps the ledger self-describing and every reader comparing
+two names rather than learning a sentinel.
+
+Each class clears `minSample` on its own evidence: a reviewer that agreed with
+itself two hundred times does not thereby unlock a precision computed from three
+independent judgements. **An absent `judged_by` is counted as neither** — not as
+self, not as independent. Every line written before this distinction existed has
+no attribution at all, and counting those as independent by default is exactly
+the flattering number this command exists to refuse (fw-bu2).
+
+No JSON key is called `precision`. A dashboard that wants one reads
+`.independent.agreement`, which is the discrimination made explicit. The
+top-level key was removed rather than renamed so a consumer of the old shape
+fails loudly instead of quietly rescaling a number whose meaning changed.
+
+Today it reports the honest answer: 17 findings, 11 judged, and no precision —
+because no finding in the fleet has yet been judged by anyone but the agent that
+raised it. The number arrives when the ledger does.
 
 ## Conformance
 
