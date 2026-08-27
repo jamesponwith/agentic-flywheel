@@ -35,7 +35,7 @@ func repoWith(t *testing.T, paths ...string) Repo {
 	// has to be a real repo with the artifacts committed — a bare temp dir
 	// models a situation that never occurs in the roster.
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
-		{"config", "user.email", "d@d"}, {"config", "user.name", "d"},
+		{"config", "user.email", "d@invalid"}, {"config", "user.name", "d"},
 		{"add", "-A"}, {"commit", "-qm", "fixture"}} {
 		c := inDir(dir, "git", a...)
 		_ = c.Run() // an empty fixture has nothing to commit; that is fine
@@ -246,7 +246,7 @@ func TestManifestMarksTheArtifactsThatBitUs(t *testing.T) {
 func TestPresentRequiresGitToTrackIt(t *testing.T) {
 	dir := t.TempDir()
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
-		{"config", "user.email", "d@d"}, {"config", "user.name", "d"}} {
+		{"config", "user.email", "d@invalid"}, {"config", "user.name", "d"}} {
 		c := inDir(dir, "git", a...)
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)

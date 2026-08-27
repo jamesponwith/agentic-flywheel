@@ -10,7 +10,7 @@ func gitRepo(t *testing.T) string {
 	dir := t.TempDir()
 	for _, args := range [][]string{
 		{"init", "-q", "-b", "main"},
-		{"config", "user.email", "t@t"}, {"config", "user.name", "t"},
+		{"config", "user.email", "t@invalid"}, {"config", "user.name", "t"},
 	} {
 		if out, err := gitCmd(dir, args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -144,11 +144,11 @@ func TestBypassCalibration(t *testing.T) {
 	// no merge commit, and none of them is a skipped gate.
 	dir := gitRepo(t)
 	commit(t, dir, "initial")
-	commit(t, dir, "Add a feature (#7)")                                        // squash-merged PR
-	commitAs(t, dir, "github-actions", "bot@gh", "learn: weekly DORA snapshot") // automation
-	commit(t, dir, "bd: close abc-123")                                         // bookkeeping
-	commit(t, dir, "chore: bump thing")                                         // bookkeeping
-	commit(t, dir, "fix the parser without a PR")                               // the real thing
+	commit(t, dir, "Add a feature (#7)")                                             // squash-merged PR
+	commitAs(t, dir, "github-actions", "bot@invalid", "learn: weekly DORA snapshot") // automation
+	commit(t, dir, "bd: close abc-123")                                              // bookkeeping
+	commit(t, dir, "chore: bump thing")                                              // bookkeeping
+	commit(t, dir, "fix the parser without a PR")                                    // the real thing
 
 	got, err := DetectBypasses("r", dir, "")
 	if err != nil {

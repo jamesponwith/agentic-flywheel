@@ -63,7 +63,7 @@ func TestAppendOnlyLedgersMergeAsUnion(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			git("config", "user.email", "fixture@fleet.invalid")
+			git("config", "user.email", "fixture@invalid")
 			git("config", "user.name", "fixture")
 			git("add", "-A")
 			git("commit", "-qm", "base")
