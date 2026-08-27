@@ -33,7 +33,7 @@ func hookRepo(t *testing.T, hook string, mode os.FileMode) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
-		{"config", "user.email", "d@d"}, {"config", "user.name", "d"}} {
+		{"config", "user.email", "d@invalid"}, {"config", "user.name", "d"}} {
 		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}

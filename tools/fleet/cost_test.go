@@ -57,6 +57,67 @@ func TestReadSpendSumsRecordedCost(t *testing.T) {
 	}
 }
 
+func TestReadSpendDeduplicatesWholeLines(t *testing.T) {
+	// guard.sh restore-log merges the mirror into the repo copy with `sort -u`
+	// over whole records, on the stated grounds that each line carries its own
+	// ts and so two identical lines ARE the same event. This is the only reader
+	// of that ledger and it has to agree. The first case is the live pair for
+	// fw-dov, both stamped 2026-08-20T22:28:25Z.
+	for _, tc := range []struct {
+		name                    string
+		lines                   []string
+		builders, green, tokens int
+		usd                     float64
+	}{
+		{
+			name: "a byte-identical pair is one event",
+			lines: []string{
+				`{"ts":"2026-08-20T22:28:25Z","event":"bead.claimed","bead":"fw-dov"}`,
+				`{"ts":"2026-08-20T22:28:25Z","event":"bead.claimed","bead":"fw-dov"}`,
+				`{"ts":"2026-08-20T22:28:25Z","event":"bead.gate_green","bead":"fw-dov"}`,
+				`{"ts":"2026-08-20T22:28:25Z","event":"bead.gate_green","bead":"fw-dov"}`,
+			},
+			builders: 1, green: 1,
+		},
+		{
+			// The guard against over-collapsing: a bead claimed, abandoned and
+			// claimed again, or opening two PRs, differs only in ts. A key of
+			// (event, bead) would swallow the second of each, trading this
+			// overcount for an undercount.
+			name: "events differing only in ts are two events",
+			lines: []string{
+				`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","bead":"fw-x"}`,
+				`{"ts":"2026-08-16T14:00:00Z","event":"bead.claimed","bead":"fw-x"}`,
+				`{"ts":"2026-08-16T15:00:00Z","event":"bead.pr_opened","bead":"fw-x"}`,
+				`{"ts":"2026-08-16T16:00:00Z","event":"bead.pr_opened","bead":"fw-x"}`,
+			},
+			builders: 2, green: 2,
+		},
+		{
+			// Deduplicating before the parse covers the numerator as well as
+			// the denominator. Nothing emits a duplicated cost record today.
+			name: "a duplicated cost is billed once",
+			lines: []string{
+				`{"ts":"2026-08-16T10:00:00Z","event":"bead.cost","bead":"fw-x","usd":"3.00","tokens":"900"}`,
+				`{"ts":"2026-08-16T10:00:00Z","event":"bead.cost","bead":"fw-x","usd":"3.00","tokens":"900"}`,
+			},
+			usd: 3.0, tokens: 900,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sp, err := ReadSpend(logRepo(t, tc.lines...), time.Time{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sp.Builders != tc.builders || sp.Green != tc.green || sp.USD != tc.usd || sp.Tokens != tc.tokens {
+				t.Errorf("spend = %d builder(s), %d green, $%v, %d tokens; want %d, %d, $%v, %d",
+					sp.Builders, sp.Green, sp.USD, sp.Tokens,
+					tc.builders, tc.green, tc.usd, tc.tokens)
+			}
+		})
+	}
+}
+
 func TestReadSpendSurvivesACorruptLine(t *testing.T) {
 	// One bad line must not lose the ledger — the log is append-only from
 	// concurrent builders, so a torn write is a question of when, not if.
@@ -128,20 +189,28 @@ func TestReadSpendCountsTwoPRsFromOneBeadTwice(t *testing.T) {
 
 func TestReadSpendDoesNotDeduplicateGreensWithoutAPR(t *testing.T) {
 	// A green naming no bead or no pr cannot be correlated with a PR, so it
-	// keeps the old per-event count. This asserts the scope of the fix, not the
-	// fix: it passes against the unfixed reader too.
+	// keeps the per-event count. This asserts the SCOPE of the fix, not the
+	// fix.
 	//
-	// It is not the honest direction — the first two lines here are the real
+	// It wanted two greens, and said so: the first two lines are the real
 	// exact-duplicate pair from .flywheel/agent-log.jsonl, one event counted
-	// twice, and a larger denominator makes the fleet look cheaper per PR. It
-	// wants whole-line deduplication, which is fw-6gc, not this key.
+	// twice, which a larger denominator turns into a fleet that looks cheaper
+	// per PR. fw-6gc has since landed and deduplicates whole lines, so the
+	// pair collapses to one and the answer is 2.
+	//
+	// What is still being asserted is the boundary between the two fixes: the
+	// third line is a green with a pr and no bead, and it must NOT be folded
+	// into the first by this key. Line deduplication handles identical
+	// records; this key handles one PR announced twice. Neither reaches into
+	// the other.
 	repo := logRepo(t,
 		`{"ts":"2026-08-20T22:28:25Z","event":"bead.gate_green","bead":"fw-dov"}`,
 		`{"ts":"2026-08-20T22:28:25Z","event":"bead.gate_green","bead":"fw-dov"}`,
 		`{"ts":"2026-08-20T22:30:00Z","event":"bead.pr_opened","pr":"58"}`)
 	sp, _ := ReadSpend(repo, time.Time{})
-	if sp.Green != 3 {
-		t.Errorf("green = %d, want 3 — collapsed greens that name no PR to correlate on", sp.Green)
+	if sp.Green != 2 {
+		t.Errorf("green = %d, want 2 — the duplicate pair is one event (fw-6gc), and the "+
+			"unkeyed green beside it must still count on its own", sp.Green)
 	}
 }
 

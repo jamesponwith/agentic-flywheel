@@ -52,6 +52,10 @@ type greenPR struct{ bead, pr string }
 // not as cost, which is what keeps Measured honest.
 func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 	sp := Spend{Repo: repo.Name}
+	// ponytail: the whole set of distinct lines is held in memory. At the
+	// ledger's size — hundreds of records — that is nothing; if it ever
+	// matters, key on a hash of the line instead of the line.
+	seen := map[string]bool{}
 	counted := map[greenPR]bool{}
 	f, err := os.Open(filepath.Join(repo.Path, ".flywheel", "agent-log.jsonl"))
 	if err != nil {
@@ -62,6 +66,31 @@ func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 1<<20)
 	for sc.Scan() {
+		// A byte-identical repeat is the same event, not a second one. That is
+		// guard.sh restore-log's rule, stated where it merges the mirror with
+		// `sort -u`: each line carries its own ts, so two identical lines ARE
+		// the same event. .gitattributes marks this ledger merge=union and
+		// git's union driver concatenates without deduplicating, so branches
+		// keep producing them — the live log holds a duplicated bead.claimed
+		// and a duplicated bead.gate_green for fw-dov, both stamped
+		// 2026-08-20T22:28:25Z, counted as an extra builder and an extra green
+		// for a single run (fw-6gc).
+		//
+		// Whole line, not (event, bead): a bead legitimately claimed twice, or
+		// opening two PRs, differs only in ts, and collapsing on the event
+		// would trade this overcount for an undercount. Deduplicating before
+		// the parse covers usd= too, so fw-d20's green deduplication cannot
+		// turn a duplicated cost-carrying green into an inflated numerator.
+		//
+		// This closes the duplicate-line route and only that one. A single PR
+		// that logs both bead.pr_opened and bead.gate_green still counts as two
+		// greens; that is fw-d20 — different key, separate change.
+		line := sc.Text()
+		if seen[line] {
+			continue
+		}
+		seen[line] = true
+
 		var e map[string]string
 		if json.Unmarshal(sc.Bytes(), &e) != nil {
 			continue // a corrupt line must not lose the whole ledger
