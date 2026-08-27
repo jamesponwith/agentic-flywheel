@@ -19,6 +19,11 @@ import (
 )
 
 // ledger writes an audit log for a repo whose entries are `age` old.
+//
+// Each successive entry is stamped a second further back. ReadSpend treats a
+// byte-identical line as a repeat of one event, so without the stagger two
+// equal costs in one call would be written as the same line and billed once —
+// a helper that silently halves the number the test asserts on (fw-6gc).
 func ledger(t *testing.T, name string, age time.Duration, usd ...float64) Repo {
 	t.Helper()
 	dir := t.TempDir()
@@ -26,9 +31,9 @@ func ledger(t *testing.T, name string, age time.Duration, usd ...float64) Repo {
 		t.Fatal(err)
 	}
 	var body string
-	for _, u := range usd {
+	for i, u := range usd {
 		body += fmt.Sprintf(`{"ts":%q,"event":"bead.cost","repo":%q,"usd":"%.4f"}`+"\n",
-			time.Now().Add(-age).UTC().Format(time.RFC3339), name, u)
+			time.Now().Add(-age-time.Duration(i)*time.Second).UTC().Format(time.RFC3339), name, u)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".flywheel", "agent-log.jsonl"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
