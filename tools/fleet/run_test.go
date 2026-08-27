@@ -16,7 +16,7 @@ func TestCommitsSinceIgnoresTheBase(t *testing.T) {
 		}
 	}
 	run("init", "-q", "-b", "main")
-	run("config", "user.email", "t@t")
+	run("config", "user.email", "t@invalid")
 	run("config", "user.name", "t")
 	run("commit", "-q", "--allow-empty", "-m", "root")
 	run("checkout", "-q", "-b", "feature")

@@ -17,7 +17,7 @@ func reconcileRepo(t *testing.T) Repo {
 	t.Helper()
 	dir := t.TempDir()
 	for _, a := range [][]string{{"init", "-q", "-b", "main"},
-		{"config", "user.email", "r@r"}, {"config", "user.name", "r"},
+		{"config", "user.email", "r@invalid"}, {"config", "user.name", "r"},
 		{"commit", "-q", "--allow-empty", "-m", "root"}} {
 		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
