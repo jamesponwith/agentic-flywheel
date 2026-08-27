@@ -46,7 +46,6 @@
       "Bash(uv run ruff:*)"
     ],
     "deny": [
-      "Bash(gh pr merge:*)",
       "Bash(git push --force:*)",
       "Bash(git tag:*)",
       "Bash(gh release:*)",

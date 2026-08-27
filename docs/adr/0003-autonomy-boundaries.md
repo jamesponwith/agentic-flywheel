@@ -39,6 +39,27 @@ Three of five repos were also shipping a five-entry allowlist with no deny
 block at all, because the working-tree file was never committed and builders
 cut worktrees from HEAD. Committed now.
 
+## Amendment, 2026-08-27: the merge denial moved to the spawn
+
+A deny in `.claude/settings.json` applies to whoever reads it, and the
+maintainer reads it too. So `Bash(gh pr merge:*)` there meant *nobody* could
+merge, and removing it would have handed merge authority to every builder. A
+deny also beats an allow from a more specific settings file — measured, not
+assumed, so a session-scoped grant could not split them either.
+
+That one rule now rides on the builder spawn as `--disallowed-tools`, and only
+that one. The supervised session merges; an unattended builder cannot. It is
+also the stronger place for it: a builder can edit `.claude/settings.json`
+inside its own worktree, and cannot edit the flags it was launched with.
+
+Everything else ADR 0003 forbids stays in the shared file, because neither
+party should be tagging, releasing, force-pushing or reading secrets.
+
+The consequence below is amended: the human is no longer the merge authority by
+permission, only by convention and review. What still bounds an unattended
+builder is the worktree, the reviewed PR, the unprivileged user, and now a
+denial it cannot reach.
+
 ## Consequences
 
 The human stays the merge authority, so the worst unattended outcome is a bad
