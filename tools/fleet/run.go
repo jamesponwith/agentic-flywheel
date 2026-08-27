@@ -293,6 +293,9 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		// to have one. The wall-clock cap bounds every runner regardless.
 		args = append(args, "--max-turns", fmt.Sprint(opts.MaxTurns))
 	}
+	if runner.Cmd == "claude" {
+		args = append(args, "--disallowed-tools", unattendedDenials)
+	}
 	cmd := exec.CommandContext(ctx, runner.Cmd, args...)
 	if runner.quietStdin() {
 		// The bug that kept the review panel dead for its whole life: an agent
@@ -585,3 +588,23 @@ func fleetWidth(as []Assignment, ceiling int) int {
 	}
 	return w
 }
+
+// unattendedDenials is the part of ADR 0003 that must NOT live in
+// .claude/settings.json.
+//
+// A deny in that file applies to whoever reads it, and the maintainer reads it
+// too — so keeping `gh pr merge` there meant nobody could merge, and deleting
+// it there would hand merge authority to every builder. A deny also beats an
+// allow from any file, so a session-scoped grant cannot override it; that was
+// measured, not assumed.
+//
+// Attaching it to the spawn separates the two: the supervised session merges,
+// the unattended builder cannot. It is also the stronger place for it. A
+// builder can edit .claude/settings.json inside its own worktree; it cannot
+// edit the flags it was launched with. ADR 0003's amendment already says the
+// allowlist is defence in depth rather than a sandbox — this moves the one
+// rule that has to differ between the two callers out of the shared file.
+//
+// The rest of ADR 0003's denials stay in settings.json, where they apply to
+// both, because neither party should be tagging, releasing or reading secrets.
+const unattendedDenials = "Bash(gh pr merge:*)"
