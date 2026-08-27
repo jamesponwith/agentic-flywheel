@@ -43,6 +43,10 @@ func (s Spend) PerGreenPR() (float64, bool) {
 	return s.USD / float64(s.Green), true
 }
 
+// greenPR identifies the PR a green event is about. One PR is one green no
+// matter how many events announce it.
+type greenPR struct{ bead, pr string }
+
 // ReadSpend sums the audit log for a repo. Entries carry usd= and tokens= when
 // the runner reported them; entries that do not are counted as activity but
 // not as cost, which is what keeps Measured honest.
@@ -52,6 +56,7 @@ func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 	// ledger's size — hundreds of records — that is nothing; if it ever
 	// matters, key on a hash of the line instead of the line.
 	seen := map[string]bool{}
+	counted := map[greenPR]bool{}
 	f, err := os.Open(filepath.Join(repo.Path, ".flywheel", "agent-log.jsonl"))
 	if err != nil {
 		return sp, nil // no log is not an error; it is an unrun fleet
@@ -98,7 +103,35 @@ func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 		case "bead.claimed":
 			sp.Builders++
 		case "bead.gate_green", "bead.pr_opened":
-			sp.Green++
+			// One PR is one green, however many events announce it. fw-oef.8
+			// logged bead.pr_opened (pr=1) and then bead.gate_green (pr=1) six
+			// minutes later; both reached here and one PR doubled the
+			// denominator under a measured numerator (fw-d20).
+			//
+			// Keyed on (bead, pr) and not on bead alone: a bead may
+			// legitimately open more than one PR, and collapsing per bead
+			// would trade this overcount for an undercount.
+			//
+			// A green missing either field cannot be correlated with a PR, so
+			// it still counts per event. That is the older behaviour and NOT the
+			// conservative direction — a larger denominator makes the fleet
+			// look cheaper per PR, not dearer. It is kept because the events
+			// that hit it are exact-duplicate ledger records, which want
+			// whole-line deduplication rather than this key (fw-6gc).
+			//
+			// NOTE: no code in this repo emits bead.gate_green — every
+			// `guard.sh log` call site writes bead.claimed, bead.pr_opened,
+			// bead.abandoned or gate.skipped. The event is written by hand or
+			// by agents following the skill, so what it carries is convention,
+			// not a guarantee. Only the fw-oef.8 pair has ever named a pr.
+			k := greenPR{e["bead"], e["pr"]}
+			if k.bead == "" || k.pr == "" || !counted[k] {
+				// The unkeyed case records a key it will never consult: the
+				// emptiness tests short-circuit ahead of the map on every
+				// later visit, so such a green always counts.
+				counted[k] = true
+				sp.Green++
+			}
 		}
 		if v, ok := e["usd"]; ok {
 			if f, err := strconv.ParseFloat(v, 64); err == nil {

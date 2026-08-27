@@ -144,6 +144,76 @@ func TestReadSpendHonoursTheWindow(t *testing.T) {
 	}
 }
 
+func TestReadSpendCountsOnePROnce(t *testing.T) {
+	// The real shape from .flywheel/agent-log.jsonl: fw-oef.8 logged
+	// bead.pr_opened (pr=1) and then bead.gate_green (pr=1) six minutes later.
+	// Both are green events about one PR; counting both halves the headline
+	// per-green-PR cost independently of any measurement problem.
+	//
+	// Both events carry a cost here to pin the other half of the fix at the
+	// same time: deduplication is about the denominator only. Each event
+	// carries its own usd, so dropping the second green's cost would move the
+	// numerator to repair the denominator and leave the headline just as wrong.
+	repo := logRepo(t,
+		`{"ts":"2026-08-15T21:52:15Z","event":"bead.pr_opened","bead":"fw-oef.8","pr":"1","usd":"3.00","tokens":"1000"}`,
+		`{"ts":"2026-08-15T21:58:03Z","event":"bead.gate_green","bead":"fw-oef.8","pr":"1","usd":"1.50","tokens":"500"}`)
+	sp, err := ReadSpend(repo, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp.Green != 1 {
+		t.Errorf("green = %d, want 1 — one PR announced twice counted twice", sp.Green)
+	}
+	if sp.USD != 4.5 || sp.Tokens != 1500 {
+		t.Errorf("spend = $%v / %d tokens, want $4.50 / 1500 — deduplication ate real cost", sp.USD, sp.Tokens)
+	}
+	if per, ok := sp.PerGreenPR(); !ok || per != 4.5 {
+		t.Errorf("per green PR = %v (%v), want 4.5", per, ok)
+	}
+}
+
+func TestReadSpendCountsTwoPRsFromOneBeadTwice(t *testing.T) {
+	// The guard against fixing the overcount into an undercount: the rule is
+	// one green per PR, not one green per bead. A bead that opens a second PR
+	// after review has produced two green PRs and must read as two.
+	repo := logRepo(t,
+		`{"ts":"2026-08-15T21:52:15Z","event":"bead.pr_opened","bead":"fw-oef.8","pr":"1"}`,
+		`{"ts":"2026-08-15T21:58:03Z","event":"bead.gate_green","bead":"fw-oef.8","pr":"1"}`,
+		`{"ts":"2026-08-16T09:10:00Z","event":"bead.pr_opened","bead":"fw-oef.8","pr":"7"}`,
+		`{"ts":"2026-08-16T09:20:00Z","event":"bead.gate_green","bead":"fw-oef.8","pr":"7"}`)
+	sp, _ := ReadSpend(repo, time.Time{})
+	if sp.Green != 2 {
+		t.Errorf("green = %d, want 2 — deduplicated per bead instead of per PR", sp.Green)
+	}
+}
+
+func TestReadSpendDoesNotDeduplicateGreensWithoutAPR(t *testing.T) {
+	// A green naming no bead or no pr cannot be correlated with a PR, so it
+	// keeps the per-event count. This asserts the SCOPE of the fix, not the
+	// fix.
+	//
+	// It wanted two greens, and said so: the first two lines are the real
+	// exact-duplicate pair from .flywheel/agent-log.jsonl, one event counted
+	// twice, which a larger denominator turns into a fleet that looks cheaper
+	// per PR. fw-6gc has since landed and deduplicates whole lines, so the
+	// pair collapses to one and the answer is 2.
+	//
+	// What is still being asserted is the boundary between the two fixes: the
+	// third line is a green with a pr and no bead, and it must NOT be folded
+	// into the first by this key. Line deduplication handles identical
+	// records; this key handles one PR announced twice. Neither reaches into
+	// the other.
+	repo := logRepo(t,
+		`{"ts":"2026-08-20T22:28:25Z","event":"bead.gate_green","bead":"fw-dov"}`,
+		`{"ts":"2026-08-20T22:28:25Z","event":"bead.gate_green","bead":"fw-dov"}`,
+		`{"ts":"2026-08-20T22:30:00Z","event":"bead.pr_opened","pr":"58"}`)
+	sp, _ := ReadSpend(repo, time.Time{})
+	if sp.Green != 2 {
+		t.Errorf("green = %d, want 2 — the duplicate pair is one event (fw-6gc), and the "+
+			"unkeyed green beside it must still count on its own", sp.Green)
+	}
+}
+
 // The two OverBudget tests lived here. They went with the mechanism: nothing
 // gates on dollars any more, and a test for a deleted gate is a test that
 // passes forever without asserting anything about the system.
