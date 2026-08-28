@@ -11,23 +11,25 @@ import (
 func beadRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	for _, a := range [][]string{
-		{"init", "-q", "-b", "main"},
-		{"config", "user.email", "d@invalid"}, {"config", "user.name", "d"},
-	} {
-		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", a, err, out)
-		}
-	}
+	gitAll(t, dir,
+		[]string{"init", "-q", "-b", "main"},
+		[]string{"config", "user.email", "d@invalid"}, []string{"config", "user.name", "d"},
+	)
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, a := range [][]string{{"add", "-A"}, {"commit", "-qm", "seed"}} {
+	gitAll(t, dir, []string{"add", "-A"}, []string{"commit", "-qm", "seed"})
+	return dir
+}
+
+// gitAll runs each command in dir and fails the test on the first error.
+func gitAll(t *testing.T, dir string, cmds ...[]string) {
+	t.Helper()
+	for _, a := range cmds {
 		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
 	}
-	return dir
 }
 
 func branchExists(t *testing.T, dir, branch string) bool {
@@ -50,16 +52,6 @@ func TestOneNoOpDoesNotLockTheBeadForever(t *testing.T) {
 	}
 	if branchExists(t, dir, "bead/x") {
 		t.Error("empty leftover survived; the next worktree add still fails")
-	}
-}
-
-// gitAll runs each command in dir and fails the test on the first error.
-func gitAll(t *testing.T, dir string, cmds ...[]string) {
-	t.Helper()
-	for _, a := range cmds {
-		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", a, err, out)
-		}
 	}
 }
 
@@ -146,6 +138,47 @@ func TestAStaleBranchWithWorkIsRefusedAfterARewrite(t *testing.T) {
 	}
 	if !branchExists(t, dir, "bead/w") {
 		t.Fatal("the work is gone")
+	}
+}
+
+func TestTheRefusalCountsAgainstMainNotTheMergeBase(t *testing.T) {
+	// Rewrite a non-root commit so a merge-base exists, then add real work on
+	// the old history. The refusal must count the one file the branch added,
+	// not the files the rewritten commits touched on the way.
+	dir := beadRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "g.txt"), []byte("pre"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAll(t, dir,
+		[]string{"add", "-A"},
+		[]string{"commit", "-qm", "adds g"},
+		[]string{"branch", "bead/u"},
+		[]string{"commit", "-q", "--amend", "-m", "adds g (rewritten)"},
+		[]string{"checkout", "-q", "bead/u"},
+	)
+	if err := os.WriteFile(filepath.Join(dir, "work.txt"), []byte("real"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitAll(t, dir,
+		[]string{"add", "-A"},
+		[]string{"commit", "-qm", "real work"},
+		[]string{"checkout", "-q", "main"},
+	)
+	err := clearEmptyBranch(dir, headOf(dir), "bead/u")
+	if err == nil || !strings.Contains(err.Error(), "1 file(s) changed") {
+		t.Fatalf("expected a refusal naming exactly the added file, got: %v", err)
+	}
+}
+
+func TestNoRecordedBaseIsARefusalNotAGuess(t *testing.T) {
+	dir := beadRepo(t)
+	gitAll(t, dir, []string{"branch", "bead/nb"})
+	err := clearEmptyBranch(dir, "", "bead/nb")
+	if err == nil || !strings.Contains(err.Error(), "no base commit") {
+		t.Fatalf("expected a refusal naming the missing base, got: %v", err)
+	}
+	if !branchExists(t, dir, "bead/nb") {
+		t.Fatal("deleted a branch it could not judge")
 	}
 }
 

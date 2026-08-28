@@ -464,7 +464,7 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 }
 
 // headOf returns the commit a worktree will be cut from.
-func headOf(dir string) string { return revParse(dir, "rev-parse", "HEAD") }
+func headOf(dir string) string { return gitLine(dir, "rev-parse", "HEAD") }
 
 // commitsSince counts what the builder itself added — commits between the base
 // the worktree was cut from and the branch head. This is the only evidence a
@@ -555,33 +555,48 @@ func clearEmptyBranch(repoPath, base, branch string) error {
 	if err := git2(repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
 		return nil // no such branch; nothing to clear
 	}
-	// Any worktree still holding it is a live builder, not a leftover.
+	// Any worktree still holding it is a live builder, not a leftover. Not
+	// being able to list worktrees is not evidence that there are none.
 	out, err := inDir(repoPath, "git", "worktree", "list", "--porcelain").Output()
-	if err == nil && strings.Contains(string(out), "branch refs/heads/"+branch+"\n") {
+	if err != nil {
+		return fmt.Errorf("worktree: cannot list worktrees, so cannot tell whether %s is live; not touching it", branch)
+	}
+	if strings.Contains(string(out), "branch refs/heads/"+branch+"\n") {
 		return fmt.Errorf("worktree: %s is checked out in another worktree — "+
 			"a builder may still be running; not touching it", branch)
 	}
-	mb := revParse(repoPath, "merge-base", base, branch)
+	if base == "" {
+		return fmt.Errorf("worktree: %s already exists and no base commit was recorded to judge it against; not touching it", branch)
+	}
+	mb := gitLine(repoPath, "merge-base", base, branch)
 	if mb == "" {
 		return fmt.Errorf("worktree: %s already exists and shares no history with %s — "+
 			"refusing to guess whether it is work; merge or drop it by hand", branch, base)
 	}
-	tree := revParse(repoPath, "rev-parse", branch+"^{tree}")
+	tree := gitLine(repoPath, "rev-parse", branch+"^{tree}")
 	if tree != "" && mainHasTree(repoPath, mb, base, tree) {
 		if err := git2(repoPath, "branch", "-D", branch); err != nil {
 			return fmt.Errorf("worktree: could not clear the empty leftover %s: %w", branch, err)
 		}
 		return nil
 	}
-	files := filesBetween(repoPath, mb, branch)
-	return fmt.Errorf("worktree: %s already exists with %d file(s) changed against main — "+
-		"refusing to delete an agent's work; merge or drop it by hand", branch, files)
+	// Count against base, not the merge-base: after a rewrite the merge-base
+	// sits behind everything that was rewritten, and the count would include
+	// files main already has. A count of zero means git could not tell us.
+	if n := filesBetween(repoPath, base, branch); n > 0 {
+		return fmt.Errorf("worktree: %s already exists with %d file(s) changed against %s — "+
+			"refusing to delete an agent's work; merge or drop it by hand", branch, n, base)
+	}
+	return fmt.Errorf("worktree: %s already exists with content %s does not have — "+
+		"refusing to delete an agent's work; merge or drop it by hand", branch, base)
 }
 
 // mainHasTree reports whether tree is the tree of mb or of any commit on
 // mb..base — i.e. whether main already holds exactly this content.
 func mainHasTree(dir, mb, base, tree string) bool {
-	if revParse(dir, "rev-parse", mb+"^{tree}") == tree {
+	// mb gets its own check: `--not mb` excludes it, and `mb^..base` would
+	// fail whenever the merge-base is a root commit.
+	if gitLine(dir, "rev-parse", mb+"^{tree}") == tree {
 		return true
 	}
 	out, err := inDir(dir, "git", "log", "--format=%T", base, "--not", mb).Output()
@@ -607,9 +622,9 @@ func filesBetween(dir, from, to string) int {
 	return len(strings.Fields(string(out)))
 }
 
-// revParse runs a git command expected to print one id and returns it
+// gitLine runs a git command expected to print one line and returns it
 // trimmed, or "" on any failure.
-func revParse(dir string, args ...string) string {
+func gitLine(dir string, args ...string) string {
 	out, err := inDir(dir, "git", args...).Output()
 	if err != nil {
 		return ""
