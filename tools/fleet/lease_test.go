@@ -74,6 +74,14 @@ func (f *fakeBD) run(dir string, args ...string) ([]byte, error) {
 		return []byte("{}"), nil
 	case "note":
 		return []byte("{}"), nil
+	case "close":
+		if f.fail["close "+args[1]] {
+			return nil, errNotFound{args[1]}
+		}
+		b := f.beads[args[1]]
+		b.Status = "closed"
+		b.Metadata["close_reason"] = args[3]
+		return []byte("{}"), nil
 	}
 	return []byte("{}"), nil
 }

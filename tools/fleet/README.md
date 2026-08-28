@@ -8,6 +8,7 @@ fleet claim <bead> -agent NAME [-ttl 45m]   take a bead under lease
 fleet heartbeat <bead> -agent NAME          extend your own lease
 fleet release <bead> -agent NAME            give it back
 fleet reclaim                               sweep expired leases back to ready
+fleet reconcile-board                       close beads whose PR has merged
 fleet status                                who holds what, across the fleet
 fleet allocate                              tonight's plan (prints, never spawns)
 fleet hydrate                               make every repo's beads readable
@@ -86,6 +87,36 @@ The rules that matter are all refusals:
 - an in-progress bead with **no** lease is never reclaimed — that is a human's
   work, and taking it would be worse than the starvation being prevented
 
+## Why reconcile-board exists, and why it is not a gate
+
+```
+fleet reconcile-board [-roster PATH] [-execute] [-json]
+```
+
+ADR 0003 forbids the fleet merging, so every merge happens outside the loop —
+and nothing carried the result back. fw-d20, fw-6gc and fw-0rf sat open with
+merged PRs, and the next plan dispatched fw-d20: ~$7 to rebuild work already on
+main and open a second PR for it.
+
+The obvious tool, a `gh:pr` gate on the bead, does the *opposite*: `bd gate
+check` closes the gate when the PR merges and releases what it blocked — back
+into `bd ready`. Proven on fw-62j: PR 24 merged, the gate closed, and fw-fsa.9
+became ready, not closed. Gates say "do not start until X lands" (ADR 0014);
+this needs "X landed, so this is done" (ADR 0016).
+
+So the merge is carried back explicitly. For every open or in-progress bead,
+`reconcile-board` asks gh whether a PR naming it — cut on `bead/<id>` or with
+the id in its title — has merged, and closes the bead with the PR as its reason.
+By hand it is a dry run until `-execute`, like `run`; before `allocate` and
+`run` it always executes, because a plan drawn from a stale board is a wrong
+plan. The refusals:
+
+- a PR closed without merging is not a merge; the work is not on main
+- a merged PR beside a still-open one is a stack mid-review — kept, not closed
+- `fw-d20`'s merge does not close `fw-d20.1`, nor the reverse; ids nest
+- a gh failure is an **error**, never an empty list — "gh is down" must not read
+  as "nothing merged", because the second one dispatches builders
+
 ## Why the coordinator only plans
 
 `allocate` returns a plan and spawns nothing. Dry-run is the default rather than
@@ -142,7 +173,8 @@ go test -tags=conformance ./tools/fleet/
 Runs against a real `bd` database in scratch repos, asserting the failure
 behaviour: two agents cannot hold one bead, a killed agent's work returns to the
 queue with a note, a stale agent cannot resurrect its lease, human work is never
-reclaimed, the kill switch halts mid-cycle, and caps are never exceeded.
+reclaimed, the kill switch halts mid-cycle, caps are never exceeded, and a bead
+whose PR merged leaves `bd ready` and does not come back through reclaim.
 
 It also round-trips the review ledger through the real `guard.sh finding`
 rather than a fixture. This repo's own ledger records why: PR 43's cost parser
