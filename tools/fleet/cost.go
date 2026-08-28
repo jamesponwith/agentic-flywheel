@@ -22,12 +22,17 @@ import (
 
 // Spend is what one repo cost over a window.
 type Spend struct {
-	Repo     string  `json:"repo"`
-	Runs     int     `json:"runs"`
-	Builders int     `json:"builders"`
-	Green    int     `json:"green"`
-	USD      float64 `json:"usd"`
-	Tokens   int     `json:"tokens"`
+	Repo     string `json:"repo"`
+	Runs     int    `json:"runs"`
+	Builders int    `json:"builders"`
+	Green    int    `json:"green"`
+	// GreenMeasured is the subset of Green whose bead also logged a cost. The
+	// per-green ratio is only honest when it equals Green; otherwise measured
+	// spend is being divided by unmeasured activity and the figure is
+	// understated by construction (fw-ax2).
+	GreenMeasured int     `json:"green_measured"`
+	USD           float64 `json:"usd"`
+	Tokens        int     `json:"tokens"`
 	// Measured is false when no run recorded a cost. The distinction matters:
 	// zero spend and unmeasured spend look identical in a total and mean
 	// opposite things.
@@ -35,9 +40,11 @@ type Spend struct {
 }
 
 // PerGreenPR is the headline: what a merged agent PR actually costs. Returns
-// false when nothing was measured, so a caller renders "n/a" rather than 0.
+// false when nothing was measured, or when any green in the window came from
+// a run that recorded no cost, so a caller renders "n/a" rather than a number
+// that is too small by construction.
 func (s Spend) PerGreenPR() (float64, bool) {
-	if !s.Measured || s.Green == 0 {
+	if !s.Measured || s.Green == 0 || s.GreenMeasured != s.Green {
 		return 0, false
 	}
 	return s.USD / float64(s.Green), true
@@ -57,6 +64,16 @@ func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 	// matters, key on a hash of the line instead of the line.
 	seen := map[string]bool{}
 	counted := map[greenPR]bool{}
+	// Correlation for GreenMeasured, keyed by the bead field guard.sh already
+	// writes. An empty id never joins costBeads, so a green with no bead=
+	// cannot match anything and counts as unmeasured (fail closed).
+	//
+	// ponytail: the key is the bead, not the run. A bead that logged a cost
+	// once vouches for every green it ever produces, including a second PR
+	// from a later run that recorded nothing. Cost lines carry no pr= today;
+	// when they do, key on (bead, pr) like `counted` and the ceiling goes.
+	costBeads := map[string]bool{}
+	greenBeads := map[string]int{}
 	f, err := os.Open(filepath.Join(repo.Path, ".flywheel", "agent-log.jsonl"))
 	if err != nil {
 		return sp, nil // no log is not an error; it is an unrun fleet
@@ -131,20 +148,31 @@ func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 				// later visit, so such a green always counts.
 				counted[k] = true
 				sp.Green++
+				greenBeads[k.bead]++
 			}
 		}
+		measured := false
 		if v, ok := e["usd"]; ok {
 			if f, err := strconv.ParseFloat(v, 64); err == nil {
 				sp.USD += f
-				sp.Measured = true
+				measured = true
 			}
 		}
 		if v, ok := e["tokens"]; ok {
 			if n, err := strconv.Atoi(v); err == nil {
 				sp.Tokens += n
-				sp.Measured = true
+				measured = true
 			}
 		}
+		if measured {
+			sp.Measured = true
+			if e["bead"] != "" {
+				costBeads[e["bead"]] = true
+			}
+		}
+	}
+	for bead := range costBeads {
+		sp.GreenMeasured += greenBeads[bead]
 	}
 	return sp, sc.Err()
 }
@@ -153,12 +181,17 @@ func (s Spend) String() string {
 	if !s.Measured {
 		return fmt.Sprintf("  %-22s %d builder(s), %d green — cost unmeasured", s.Repo, s.Builders, s.Green)
 	}
-	per := "n/a"
+	head := fmt.Sprintf("  %-22s %d builder(s), %d green, $%.2f total, ", s.Repo, s.Builders, s.Green, s.USD)
 	if v, ok := s.PerGreenPR(); ok {
-		per = fmt.Sprintf("$%.2f", v)
+		return head + fmt.Sprintf("$%.2f per green PR", v)
 	}
-	return fmt.Sprintf("  %-22s %d builder(s), %d green, $%.2f total, %s per green PR",
-		s.Repo, s.Builders, s.Green, s.USD, per)
+	if s.Green == 0 {
+		return head + "per green PR n/a (no green PRs)"
+	}
+	// Name the shortfall when refusing: the greens exist, the costs exist,
+	// and they are not the same runs.
+	return head + fmt.Sprintf("per green PR n/a (%d of %d greens came from a run that recorded a cost)",
+		s.GreenMeasured, s.Green)
 }
 
 // FleetWindowSpend is what every repo together consumed since `since`, valued
