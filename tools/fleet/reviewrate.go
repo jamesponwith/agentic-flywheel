@@ -89,6 +89,9 @@ func readLedger(path string) ([]ReviewFinding, error) {
 	defer f.Close()
 
 	var out []ReviewFinding
+	// ponytail: the whole set of distinct lines is held in memory, as in
+	// ReadSpend; at hundreds of records that is nothing. If it ever matters,
+	// key on a hash of the line instead of the line.
 	seen := map[string]bool{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 1<<20) // claims run long
@@ -97,18 +100,11 @@ func readLedger(path string) ([]ReviewFinding, error) {
 		if len(line) == 0 {
 			continue
 		}
-		// A byte-identical repeat is the same finding, not a second one.
-		// .gitattributes marks this ledger merge=union and git's union driver
-		// concatenates without deduplicating, so a finding recorded on a
-		// branch can appear twice once that branch merges. Counting it twice
-		// inflates Total, which is the denominator of the rate ADR 0013 rests
-		// on — the mirror of fw-6gc's inflated greens in ReadSpend (fw-c48).
-		//
-		// Whole line, before the parse, not a (lens, file, line) key: the
-		// same claim raised at the same place in two different runs carries
-		// two different ts values and IS two findings. Unlike agent-log.jsonl
-		// this ledger is never mirrored or sort -u'd by guard.sh, so
-		// union-merge is the only source of duplicates here.
+		// A byte-identical repeat is the same finding, not a second one: this
+		// ledger is merge=union and git's union driver concatenates without
+		// deduplicating, so counting it twice inflates Total — the mirror of
+		// fw-6gc in ReadSpend (fw-c48). Whole line, not (lens, file, line):
+		// the same claim raised in two runs differs in ts and IS two findings.
 		if seen[string(line)] {
 			continue
 		}

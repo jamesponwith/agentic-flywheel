@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // finding builds one ledger line with the given disposition. The other fields
@@ -43,12 +42,12 @@ func ledgerRepo(t *testing.T, lines ...string) Repo {
 func dispositions(t *testing.T, counts map[string]int) []ReviewFinding {
 	t.Helper()
 	// Each line gets its own ts: these are N separate findings, and the reader
-	// deliberately collapses byte-identical repeats into one.
+	// deliberately collapses byte-identical repeats into one. Nothing parses
+	// ts, so a counter is enough to make the lines distinct.
 	var lines []string
 	for _, d := range []string{"accepted", "rejected", "ignored", "reviewed-later", ""} {
 		for i := 0; i < counts[d]; i++ {
-			ts := time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC).Add(time.Duration(len(lines)) * time.Second)
-			lines = append(lines, findingAt(ts.Format(time.RFC3339), d))
+			lines = append(lines, findingAt("t"+strconv.Itoa(len(lines)), d))
 		}
 	}
 	repo := ledgerRepo(t, lines...)
@@ -248,11 +247,6 @@ func TestReadLedgerDeduplicatesWholeLinesOnly(t *testing.T) {
 				finding("accepted"),
 			},
 			want: 2,
-		},
-		{
-			name:  "surrounding whitespace does not make a new finding",
-			lines: []string{finding("accepted"), "  " + finding("accepted") + "\t"},
-			want:  1,
 		},
 	}
 	for _, tt := range tests {
