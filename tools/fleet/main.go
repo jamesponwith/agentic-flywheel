@@ -5,7 +5,8 @@
 //	fleet heartbeat <bead> -agent NAME          extend your own lease
 //	fleet release <bead> -agent NAME            give it back
 //	fleet reclaim                               sweep expired leases to ready
-//	fleet status                                who holds what, across the fleet
+//	fleet reconcile-board                       close beads whose PR has merged
+//	fleet status                               who holds what, across the fleet
 //	fleet allocate                              tonight's plan (prints, never spawns)
 //	fleet hydrate                               make every repo's beads readable
 //	fleet bypasses                              gates that got skipped, and by how much
@@ -20,6 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -77,6 +79,8 @@ func main() {
 		}
 	case "reclaim":
 		err = doReclaim(l, *asJSON)
+	case "reconcile-board":
+		err = doReconcileBoard(*rosterPath, *execute, *asJSON)
 	case "status":
 		err = doStatus(*rosterPath, *asJSON)
 	case "allocate":
@@ -119,6 +123,51 @@ func doReclaim(l leaser, asJSON bool) error {
 	}
 	for _, r := range got {
 		fmt.Printf("reclaimed %s from %s (expired %s ago)\n", r.ID, r.Holder, r.Late.Round(time.Second))
+	}
+	return nil
+}
+
+// reconcileBoards carries every human merge back to the board before the
+// coordinator reads it (ADR 0016). Failures are warnings, per repo: one repo
+// whose gh call failed must not sink the night, but it is said out loud,
+// because a silent failure here dispatches builders onto finished work.
+func reconcileBoards(r Roster, w io.Writer, execute bool) []BoardClose {
+	var all []BoardClose
+	for _, repo := range r.Repos {
+		if repo.Paused {
+			continue
+		}
+		got, err := ReconcileBoard(repo, bdClient{dir: repo.Path, run: execBD}, ghPRs, execute)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: reconcile-board: %v — beads with merged PRs may still be dispatched\n", err)
+			continue
+		}
+		for _, c := range got {
+			fmt.Fprintf(w, "  board %-22s %-12s %-7s %s\n", c.Repo, c.Bead, c.Action, c.Detail)
+		}
+		all = append(all, got...)
+	}
+	return all
+}
+
+func doReconcileBoard(rosterPath string, execute, asJSON bool) error {
+	r, err := LoadRoster(rosterPath)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		got := reconcileBoards(r, io.Discard, execute)
+		if got == nil {
+			got = []BoardClose{}
+		}
+		return json.NewEncoder(os.Stdout).Encode(got)
+	}
+	got := reconcileBoards(r, os.Stdout, execute)
+	switch {
+	case len(got) == 0:
+		fmt.Println("board matches main — no merged PR on an open bead")
+	case !execute:
+		fmt.Println("DRY RUN — pass -execute to close them")
 	}
 	return nil
 }
@@ -174,6 +223,14 @@ func doAllocate(rosterPath string, asJSON bool) error {
 	if err != nil {
 		return err
 	}
+	// A plan drawn from a board that has drifted from main includes work that
+	// is already merged (fw-y1y). Board lines go to stderr under -json so the
+	// plan stays the only thing on stdout.
+	boardOut := io.Writer(os.Stdout)
+	if asJSON {
+		boardOut = os.Stderr
+	}
+	reconcileBoards(r, boardOut, true)
 	plan, err := AllocateWithLoad(r, func(path string) bdClient {
 		return bdClient{dir: path, run: execBD}
 	}, ghReviewLoad, time.Now())
@@ -409,6 +466,12 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 			fmt.Println("  " + msg)
 		}
 	}
+	// And the board: a human merged while the fleet was not looking, and the
+	// bead is still open. Dispatching it rebuilds finished work (fw-y1y).
+	// Always for real, even on a dry-run plan: a plan drawn from a stale board
+	// is a wrong plan, and closing a bead whose PR merged is not the action
+	// -execute guards (spawning agents).
+	reconcileBoards(r, os.Stdout, true)
 
 	OnlyBead = onlyBead
 	defer func() { OnlyBead = "" }()
@@ -674,6 +737,7 @@ func usage() {
   fleet heartbeat <bead> -agent NAME [-ttl 45m] [-dir .]
   fleet release <bead> -agent NAME [-dir .]
   fleet reclaim [-dir .] [-json]
+  fleet reconcile-board [-roster PATH] [-execute] [-json]
   fleet status [-roster PATH] [-json]
   fleet allocate [-roster PATH] [-json]
   fleet hydrate [-roster PATH] [-json]
