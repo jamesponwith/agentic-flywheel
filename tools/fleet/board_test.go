@@ -186,25 +186,29 @@ func TestReconcileBoardDryRunClosesNothing(t *testing.T) {
 	}
 }
 
-func TestMentions(t *testing.T) {
+func TestNames(t *testing.T) {
 	tests := []struct {
-		s, id string
-		want  bool
+		name string
+		pr   PR
+		id   string
+		want bool
 	}{
-		{"fw-d20: cap builders", "fw-d20", true},
-		{"one PR counts as one green (fw-d20) (#62)", "fw-d20", true},
-		{"closes fw-d20.", "fw-d20", true}, // sentence-ending full stop
-		{"fw-d20", "fw-d20", true},
-		{"fw-d20.1: the first child", "fw-d20", false},
-		{"one PR counts as one green (fw-d20)", "fw-d20.1", false},
-		{"afw-d20", "fw-d20", false},
-		{"fw-d200", "fw-d20", false},
-		{"fw-d2", "fw-d20", false},
-		{"", "fw-d20", false},
+		{"the spawner's branch", PR{HeadRefName: "bead/fw-d20"}, "fw-d20", true},
+		{"a sibling's branch", PR{HeadRefName: "bead/fw-d20.1"}, "fw-d20", false},
+		{"leading id", PR{Title: "fw-d20: cap builders", HeadRefName: "x"}, "fw-d20", true},
+		{"trailing id", PR{Title: "one PR counts as one green (fw-d20) (#62)", HeadRefName: "x"}, "fw-d20", true},
+		{"a child's leading id is not the parent's", PR{Title: "fw-d20.1: the first child"}, "fw-d20", false},
+		{"the parent's trailing id is not the child's", PR{Title: "one PR counts as one green (fw-d20)"}, "fw-d20.1", false},
+		{"mentioned mid-title — an agent could name any bead it likes there", PR{Title: "fw-abc: cap builders, also fw-def"}, "fw-def", false},
+		{"bare id with no shape", PR{Title: "fw-d20"}, "fw-d20", false},
+		{"prefix of a longer id", PR{Title: "fw-d200: something else"}, "fw-d20", false},
+		{"a revert quotes the original and means the opposite", PR{Title: `Revert "fw-d20: cap builders"`, HeadRefName: "revert-62"}, "fw-d20", false},
+		{"a revert with the trailing shape", PR{Title: `Revert "one PR counts as one green (fw-d20)"`}, "fw-d20", false},
+		{"empty title", PR{}, "fw-d20", false},
 	}
 	for _, tt := range tests {
-		if got := mentions(tt.s, tt.id); got != tt.want {
-			t.Errorf("mentions(%q, %q) = %v, want %v", tt.s, tt.id, got, tt.want)
+		if got := names(tt.pr, tt.id); got != tt.want {
+			t.Errorf("%s: names(%+v, %q) = %v, want %v", tt.name, tt.pr, tt.id, got, tt.want)
 		}
 	}
 }

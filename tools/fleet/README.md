@@ -105,17 +105,25 @@ became ready, not closed. Gates say "do not start until X lands" (ADR 0014);
 this needs "X landed, so this is done" (ADR 0016).
 
 So the merge is carried back explicitly. For every open or in-progress bead,
-`reconcile-board` asks gh whether a PR naming it — cut on `bead/<id>` or with
-the id in its title — has merged, and closes the bead with the PR as its reason.
-By hand it is a dry run until `-execute`, like `run`; before `allocate` and
-`run` it always executes, because a plan drawn from a stale board is a wrong
-plan. The refusals:
+`reconcile-board` asks gh whether a PR naming it — cut on `bead/<id>`, or titled
+`<id>: …` / `… (<id>)` — has merged, and closes the bead with the PR as its
+reason. By hand it is a dry run until `-execute`, like `run`; before `allocate`
+and `run` it always executes, because a plan drawn from a stale board is a
+wrong plan. The refusals:
 
 - a PR closed without merging is not a merge; the work is not on main
 - a merged PR beside a still-open one is a stack mid-review — kept, not closed
 - `fw-d20`'s merge does not close `fw-d20.1`, nor the reverse; ids nest
-- a gh failure is an **error**, never an empty list — "gh is down" must not read
-  as "nothing merged", because the second one dispatches builders
+- an id mentioned mid-title does not count — a builder writes its own title, and
+  "fw-abc: …, also fw-def" must not close fw-def when a human merges fw-abc
+- a `Revert "…"` quotes the original's title and means the opposite
+- the kill switch is checked first: closing beads is an action
+- a gh failure is an **error** — `allocate` and `run` refuse to plan on a board
+  they could not reconcile. "gh is down" must not read as "nothing merged",
+  because the second one dispatches builders onto finished work
+
+A bead a human reopens after its PR merged is closed again next cycle; reverted
+or broken work gets a new bead. One PR is one idea (ADR 0009).
 
 ## Why the coordinator only plans
 

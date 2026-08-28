@@ -1,21 +1,10 @@
 // Board reconciliation (fw-y1y, ADR 0016).
 //
-// ADR 0003 forbids the fleet merging, so every merge happens outside the loop
-// and nothing carried the result back to the board. fw-d20, fw-6gc and fw-0rf
-// all had merged PRs and were still open or in progress; the next plan included
-// fw-d20, whose PR had merged an hour earlier, and a builder would have spent
-// ~$7 rebuilding work already on main and opened a second PR for it.
-//
-// The obvious tool, a gh:pr gate on the bead, does the opposite of what is
-// needed: `bd gate check` closes the GATE when the PR merges and releases what
-// the gate blocked — back into `bd ready`. Proven on fw-62j: PR 24 merged, the
-// gate closed, and fw-fsa.9 became ready again, not closed. A gate is for "do
-// not start until X lands"; this is "X landed, so this is done".
-//
-// So the merge is carried back explicitly: for every open or in-progress bead,
-// ask gh whether a PR naming it has merged, and close the bead with the PR as
-// the reason. Runs before every allocation, so the board cannot drift from
-// main between a human's merge and the coordinator's next dispatch.
+// ADR 0003 forbids the fleet merging, so every merge happens outside the loop,
+// and nothing carried the result back: fw-d20 was dispatched an hour after its
+// PR landed. A gh:pr gate does the opposite of what is needed — `bd gate check`
+// closes the gate and releases the bead back into ready (fw-62j) — so the merge
+// is carried back explicitly, before every allocation.
 package main
 
 import (
@@ -47,6 +36,11 @@ func ghPRs(repo Repo) ([]PR, error) {
 	out, err := exec.Command("gh", "pr", "list", "--repo", "jamesponwith/"+repo.Name,
 		"--state", "all", "--limit", "200", "--json", "number,state,title,headRefName").Output()
 	if err != nil {
+		// Keep stderr: "auth expired", "rate limited" and "no such repo" are
+		// different problems, and the caller's refusal to plan should say which.
+		if ee, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("gh pr list: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
+		}
 		return nil, fmt.Errorf("gh pr list: %w", err)
 	}
 	var prs []PR
@@ -71,6 +65,13 @@ type BoardClose struct {
 //
 // A listing failure is an error, not an empty list: "gh is down" and "nothing
 // merged" must not look alike, because the second one dispatches builders.
+//
+// ponytail: a bead a human reopened after its PR merged is closed again on the
+// next cycle, because the PR stays MERGED forever. Reverted or broken work
+// gets a new bead — one PR is one idea (ADR 0009), and a reopened one would
+// be a second idea under the first's name. A fork PR titled after a bead can
+// force "kept" and a rebuild; this repo takes no outside PRs, and the cost is
+// the pre-existing behaviour, not a new one.
 func ReconcileBoard(repo Repo, bd bdClient, list prLister, execute bool) ([]BoardClose, error) {
 	prs, err := list(repo)
 	if err != nil {
@@ -132,32 +133,22 @@ func ReconcileBoard(repo Repo, bd bdClient, list prLister, execute bool) ([]Boar
 }
 
 // names reports whether a PR is about the bead: cut on the bead's branch (the
-// spawner's convention, run.go), or naming the id in its title.
+// spawner's convention, run.go), or titled the way this repo titles PRs —
+// `<id>: …` or `… (<id>)`. Only those two shapes: a builder writes its own PR
+// title, and a looser rule (any id mentioned anywhere) would let "fw-abc: …,
+// also fw-def" close fw-def the moment a human merged fw-abc — a bead closed by
+// an agent that never built it, laundered through a review of the diff rather
+// than the title (security lens). The shapes also bound the id exactly, so
+// fw-d20 never matches fw-d20.1 or the reverse.
+//
+// A revert's title quotes the original, so it would carry the id and close
+// the bead as done — the one PR that means the opposite.
 func names(pr PR, id string) bool {
-	return pr.HeadRefName == "bead/"+id || mentions(pr.Title, id)
-}
-
-// mentions finds id in s as a whole token. Bead ids nest — fw-d20 is not
-// fw-d20.1 and must not close it — so a neighbouring id character disqualifies
-// the match, except a full stop that ends a sentence rather than an id.
-func mentions(s, id string) bool {
-	for from := 0; from < len(s); {
-		i := strings.Index(s[from:], id)
-		if i < 0 {
-			return false
-		}
-		start, end := from+i, from+i+len(id)
-		before := start == 0 || !idChar(s[start-1])
-		after := end == len(s) || !idChar(s[end]) ||
-			(s[end] == '.' && (end+1 == len(s) || !idChar(s[end+1])))
-		if before && after {
-			return true
-		}
-		from = start + 1
+	if pr.HeadRefName == "bead/"+id {
+		return true
 	}
-	return false
-}
-
-func idChar(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.'
+	if strings.HasPrefix(pr.Title, "Revert ") {
+		return false
+	}
+	return strings.HasPrefix(pr.Title, id+":") || strings.Contains(pr.Title, "("+id+")")
 }

@@ -6,7 +6,7 @@
 //	fleet release <bead> -agent NAME            give it back
 //	fleet reclaim                               sweep expired leases to ready
 //	fleet reconcile-board                       close beads whose PR has merged
-//	fleet status                               who holds what, across the fleet
+//	fleet status                                who holds what, across the fleet
 //	fleet allocate                              tonight's plan (prints, never spawns)
 //	fleet hydrate                               make every repo's beads readable
 //	fleet bypasses                              gates that got skipped, and by how much
@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -128,18 +129,30 @@ func doReclaim(l leaser, asJSON bool) error {
 }
 
 // reconcileBoards carries every human merge back to the board before the
-// coordinator reads it (ADR 0016). Failures are warnings, per repo: one repo
-// whose gh call failed must not sink the night, but it is said out loud,
-// because a silent failure here dispatches builders onto finished work.
-func reconcileBoards(r Roster, w io.Writer, execute bool) []BoardClose {
+// coordinator reads it (ADR 0016).
+//
+// Two refusals, both flagged by the review panel. The kill switch is checked
+// first: closing beads is an action, and a halted fleet must not keep
+// mutating boards. And a failed listing is an error for the CALLER too —
+// allocate and run refuse to plan on a board that could not be reconciled,
+// because "gh is down" reported as a warning and then planned over is
+// "nothing merged", which dispatches builders onto finished work. A night
+// lost to a flaky network is the cheaper failure; the kill switch remains
+// the tool for stopping on purpose.
+func reconcileBoards(r Roster, w io.Writer, execute bool) ([]BoardClose, error) {
+	if why, halted := stopped(r.activePaths()); halted {
+		return nil, fmt.Errorf("halted: kill switch set (%s) — board not reconciled", why)
+	}
 	var all []BoardClose
+	var failed []string
 	for _, repo := range r.Repos {
 		if repo.Paused {
 			continue
 		}
 		got, err := ReconcileBoard(repo, bdClient{dir: repo.Path, run: execBD}, ghPRs, execute)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: reconcile-board: %v — beads with merged PRs may still be dispatched\n", err)
+			fmt.Fprintf(os.Stderr, "reconcile-board: %v\n", err)
+			failed = append(failed, repo.Name)
 			continue
 		}
 		for _, c := range got {
@@ -147,7 +160,11 @@ func reconcileBoards(r Roster, w io.Writer, execute bool) []BoardClose {
 		}
 		all = append(all, got...)
 	}
-	return all
+	if len(failed) > 0 {
+		return all, fmt.Errorf("board not reconciled for %s — refusing to plan: a bead whose PR merged would be dispatched again",
+			strings.Join(failed, ", "))
+	}
+	return all, nil
 }
 
 func doReconcileBoard(rosterPath string, execute, asJSON bool) error {
@@ -156,13 +173,19 @@ func doReconcileBoard(rosterPath string, execute, asJSON bool) error {
 		return err
 	}
 	if asJSON {
-		got := reconcileBoards(r, io.Discard, execute)
+		got, err := reconcileBoards(r, io.Discard, execute)
 		if got == nil {
 			got = []BoardClose{}
 		}
-		return json.NewEncoder(os.Stdout).Encode(got)
+		if encErr := json.NewEncoder(os.Stdout).Encode(got); encErr != nil {
+			return encErr
+		}
+		return err
 	}
-	got := reconcileBoards(r, os.Stdout, execute)
+	got, err := reconcileBoards(r, os.Stdout, execute)
+	if err != nil {
+		return err
+	}
 	switch {
 	case len(got) == 0:
 		fmt.Println("board matches main — no merged PR on an open bead")
@@ -230,7 +253,9 @@ func doAllocate(rosterPath string, asJSON bool) error {
 	if asJSON {
 		boardOut = os.Stderr
 	}
-	reconcileBoards(r, boardOut, true)
+	if _, err := reconcileBoards(r, boardOut, true); err != nil {
+		return err
+	}
 	plan, err := AllocateWithLoad(r, func(path string) bdClient {
 		return bdClient{dir: path, run: execBD}
 	}, ghReviewLoad, time.Now())
@@ -471,7 +496,9 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 	// Always for real, even on a dry-run plan: a plan drawn from a stale board
 	// is a wrong plan, and closing a bead whose PR merged is not the action
 	// -execute guards (spawning agents).
-	reconcileBoards(r, os.Stdout, true)
+	if _, err := reconcileBoards(r, os.Stdout, true); err != nil {
+		return err
+	}
 
 	OnlyBead = onlyBead
 	defer func() { OnlyBead = "" }()
