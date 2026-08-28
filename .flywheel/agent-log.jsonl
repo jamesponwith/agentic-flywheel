@@ -63,3 +63,4 @@
 {"ts":"2026-08-27T09:36:13Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-ajl","usd":"1.9726","tokens":"1823627","turns":"54"}
 {"ts":"2026-08-27T09:50:52Z","event":"bead.cost","agent":"fleet/builder-go","repo":"agentic-flywheel","bead":"fw-6gc","usd":"6.4270","tokens":"4268841","turns":"84"}
 {"ts":"2026-08-28T01:46:48Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-2oh","bead":"fw-2oh"}
+{"ts":"2026-08-28T09:55:45Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-web","bead":"fw-web"}
