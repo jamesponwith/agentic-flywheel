@@ -42,6 +42,9 @@ tooling that runs *across* repos. Per-project tooling lives in the templates
   nothing else; `handoff` and `escalate` require an ack (ADR 0007). If you are
   stuck, `escalate` — do not guess confidently.
 - Reserve territory in blackbird before editing. No reservation, no edit.
+- Builders do not write under `.claude/` (ADR 0015). A deliverable there is
+  committed as `.flywheel/outbox/<path>` (maps to `.claude/<path>`); the human
+  runs `tools/flywheel/outbox.sh apply` on the PR branch before merging.
 
 ## Commit protocol
 
