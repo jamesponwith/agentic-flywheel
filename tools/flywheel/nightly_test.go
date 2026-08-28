@@ -192,3 +192,41 @@ func TestAGuardThatCannotAnswerIsNotAKillSwitch(t *testing.T) {
 		})
 	}
 }
+
+func TestTheResumeCarriesAWorkingEnvironment(t *testing.T) {
+	// The first auto-resume ever scheduled died at exit 127, "'go' is not on
+	// PATH". systemd-run builds a TRANSIENT unit, which inherits nothing from
+	// the installed flywheel-nightly.service — so the PATH captured at install
+	// time never reached the thing the timer schedules. The timer was fixed in
+	// #52 and the resume it spawns was not.
+	//
+	// A quota hold that cannot resume is the outage the hold exists to avoid:
+	// the fleet stops until a human notices, which is the state the whole
+	// mechanism was built to remove.
+	b, err := os.ReadFile("nightly.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	i := strings.Index(src, "systemd-run")
+	if i < 0 {
+		t.Fatal("no resume is scheduled at all")
+	}
+	// Read only the systemd-run invocation, not the whole file, so a PATH
+	// mentioned elsewhere cannot make this pass.
+	end := strings.Index(src[i:], "\n    fi")
+	if end < 0 {
+		end = len(src) - i
+	}
+	call := src[i : i+end]
+	for _, want := range []string{"--setenv", "PATH="} {
+		if !strings.Contains(call, want) {
+			t.Errorf("the systemd-run call does not pass %s, so the resumed run gets\n"+
+				"  a minimal PATH and dies before it starts:\n%s", want, call)
+		}
+	}
+	if !strings.Contains(call, "--working-directory") {
+		t.Error("the resume does not set its working directory; a transient unit " +
+			"starts wherever systemd puts it, not in the repo")
+	}
+}
