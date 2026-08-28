@@ -93,7 +93,9 @@ func (c bdClient) ready() ([]Bead, error) {
 }
 
 func (c bdClient) list(status string) ([]Bead, error) {
-	out, err := c.run(c.dir, "list", "--status", status, "--json")
+	// -n 0: bd list caps at 50 by default, and a board with more than 50 open
+	// beads would have its tail silently invisible to reclaim and reconcile.
+	out, err := c.run(c.dir, "list", "--status", status, "--json", "-n", "0")
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +154,13 @@ func (c bdClient) claim(id string) error {
 
 func (c bdClient) reopen(id string) error {
 	_, err := c.run(c.dir, "update", id, "--status", "open")
+	return err
+}
+
+// close marks a bead done with a reason naming why — for the fleet, always the
+// merged PR, because nothing else it does is a reason to close anything.
+func (c bdClient) close(id, reason string) error {
+	_, err := c.run(c.dir, "close", id, "--reason", reason)
 	return err
 }
 
