@@ -89,7 +89,12 @@ REPOS.forEach(function(repo){
       var fl = d.fleet;
       if (fl) {
         var spend = fl.measured ? "$" + fl.usd.toFixed(2) : "<em>unmeasured</em>";
-        var per = fl.measured && fl.green
+        // Only when every green came from a run that recorded a cost; a
+        // measured numerator over an unmeasured denominator understates the
+        // figure by construction (fw-ax2). A snapshot from a collector that
+        // does not emit green_measured cannot prove its greens were measured,
+        // so it renders n/a rather than the old number.
+        var per = fl.measured && fl.green && fl.green_measured === fl.green
           ? "$" + (fl.usd / fl.green).toFixed(2)
           : "<em>n/a</em>";
         var budget = fl.budget_usd_month

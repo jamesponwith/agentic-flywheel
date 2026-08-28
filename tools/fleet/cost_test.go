@@ -44,9 +44,11 @@ func TestReadSpendDistinguishesZeroFromUnmeasured(t *testing.T) {
 }
 
 func TestReadSpendSumsRecordedCost(t *testing.T) {
+	// The bead id is what ties the green to the cost (fw-ax2); without it the
+	// per-green figure would correctly refuse, and this test is about the sum.
 	repo := logRepo(t,
-		`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","usd":"1.50","tokens":"1000"}`,
-		`{"ts":"2026-08-16T11:00:00Z","event":"bead.pr_opened","usd":"2.50","tokens":"2000"}`)
+		`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","bead":"fw-x","usd":"1.50","tokens":"1000"}`,
+		`{"ts":"2026-08-16T11:00:00Z","event":"bead.pr_opened","bead":"fw-x","usd":"2.50","tokens":"2000"}`)
 	sp, _ := ReadSpend(repo, time.Time{})
 	if !sp.Measured || sp.USD != 4.0 || sp.Tokens != 3000 {
 		t.Fatalf("spend = %+v, want $4.00 / 3000 tokens", sp)
@@ -211,6 +213,107 @@ func TestReadSpendDoesNotDeduplicateGreensWithoutAPR(t *testing.T) {
 	if sp.Green != 2 {
 		t.Errorf("green = %d, want 2 — the duplicate pair is one event (fw-6gc), and the "+
 			"unkeyed green beside it must still count on its own", sp.Green)
+	}
+}
+
+func TestPerGreenPRRefusesUnlessEveryGreenWasMeasured(t *testing.T) {
+	// 'fleet cost' printed '$7.72 per green PR' from one night's spend over a
+	// month of greens, most from runs that recorded no cost at all — on the
+	// live ledger the two sets of beads were disjoint (fw-ax2). The ratio is
+	// only the cost of a PR when every green in the window has a measured
+	// run behind it; otherwise it is understated by construction and the
+	// output must say why instead of printing a number.
+	for _, tc := range []struct {
+		name                 string
+		lines                []string
+		green, greenMeasured int
+		per                  float64
+		ok                   bool
+		want                 string // substring of String()
+	}{
+		{
+			name: "every green measured",
+			lines: []string{
+				`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","bead":"fw-a","usd":"4.00"}`,
+				`{"ts":"2026-08-16T11:00:00Z","event":"bead.pr_opened","bead":"fw-a","pr":"1"}`,
+				`{"ts":"2026-08-17T10:00:00Z","event":"bead.claimed","bead":"fw-b","usd":"2.00"}`,
+				`{"ts":"2026-08-17T11:00:00Z","event":"bead.pr_opened","bead":"fw-b","pr":"2"}`,
+			},
+			green: 2, greenMeasured: 2, per: 3.0, ok: true,
+			want: "$3.00 per green PR",
+		},
+		{
+			name: "no green measured",
+			lines: []string{
+				`{"ts":"2026-08-16T11:00:00Z","event":"bead.pr_opened","bead":"fw-a","pr":"1"}`,
+				`{"ts":"2026-08-17T11:00:00Z","event":"bead.pr_opened","bead":"fw-b","pr":"2"}`,
+				`{"ts":"2026-08-20T10:00:00Z","event":"bead.claimed","bead":"fw-c","usd":"30.87"}`,
+			},
+			green: 2, greenMeasured: 0, ok: false,
+			want: "per green PR n/a (0 of 2 greens came from a run that recorded a cost)",
+		},
+		{
+			// The acceptance criterion: a window mixing measured and unmeasured
+			// runs. Dividing $4 by 2 greens would print $2.00 for a PR that
+			// actually cost $4.
+			name: "mixed window",
+			lines: []string{
+				`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","bead":"fw-a","usd":"4.00"}`,
+				`{"ts":"2026-08-16T11:00:00Z","event":"bead.pr_opened","bead":"fw-a","pr":"1"}`,
+				`{"ts":"2026-08-17T11:00:00Z","event":"bead.pr_opened","bead":"fw-b","pr":"2"}`,
+			},
+			green: 2, greenMeasured: 1, ok: false,
+			want: "per green PR n/a (1 of 2 greens came from a run that recorded a cost)",
+		},
+		{
+			// Tokens alone are a measurement too; the correlation must not
+			// depend on which unit the runner reported.
+			name: "measured in tokens only",
+			lines: []string{
+				`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","bead":"fw-a","tokens":"900"}`,
+				`{"ts":"2026-08-16T11:00:00Z","event":"bead.pr_opened","bead":"fw-a","pr":"1"}`,
+			},
+			green: 1, greenMeasured: 1, per: 0, ok: true,
+			want: "$0.00 per green PR",
+		},
+		{
+			// Money spent, nothing merged: not a correlation failure, and the
+			// refusal must not read as one.
+			name: "measured but no greens",
+			lines: []string{
+				`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","bead":"fw-a","usd":"4.00"}`,
+			},
+			green: 0, greenMeasured: 0, ok: false,
+			want: "per green PR n/a (no green PRs)",
+		},
+		{
+			// Fail closed: a green with no bead= cannot be tied to any run, and
+			// a cost with no bead= cannot vouch for any green. Blank must not
+			// match blank.
+			name: "uncorrelatable green and cost",
+			lines: []string{
+				`{"ts":"2026-08-16T10:00:00Z","event":"bead.claimed","usd":"4.00"}`,
+				`{"ts":"2026-08-16T11:00:00Z","event":"bead.pr_opened","pr":"1"}`,
+			},
+			green: 1, greenMeasured: 0, ok: false,
+			want: "per green PR n/a (0 of 1 greens came from a run that recorded a cost)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sp, err := ReadSpend(logRepo(t, tc.lines...), time.Time{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sp.Green != tc.green || sp.GreenMeasured != tc.greenMeasured {
+				t.Errorf("green = %d, measured = %d; want %d, %d", sp.Green, sp.GreenMeasured, tc.green, tc.greenMeasured)
+			}
+			if per, ok := sp.PerGreenPR(); ok != tc.ok || per != tc.per {
+				t.Errorf("per green PR = %v (%v), want %v (%v)", per, ok, tc.per, tc.ok)
+			}
+			if !strings.Contains(sp.String(), tc.want) {
+				t.Errorf("String() = %q, want it to contain %q", sp.String(), tc.want)
+			}
+		})
 	}
 }
 
