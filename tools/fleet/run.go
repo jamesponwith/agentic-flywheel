@@ -464,13 +464,7 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 }
 
 // headOf returns the commit a worktree will be cut from.
-func headOf(dir string) string {
-	out, err := inDir(dir, "git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
+func headOf(dir string) string { return gitLine(dir, "rev-parse", "HEAD") }
 
 // commitsSince counts what the builder itself added — commits between the base
 // the worktree was cut from and the branch head. This is the only evidence a
@@ -543,28 +537,99 @@ func classify(runErr error, commits int, timedOut bool) string {
 // the bead can never be attempted again: one no-op locks it forever. The queue
 // self-locks one bead at a time, and nothing says why.
 //
-// A branch carrying commits is never touched. That is reconcile's rule and it
+// A branch carrying content is never touched. That is reconcile's rule and it
 // is the important half — losing an agent's pushed work to a tidy-up is far
 // worse than a stuck bead, so this refuses rather than guesses.
+//
+// "Carrying content" is judged by tree, not by commit count. Counting
+// base..branch is right until main's SHAs change underneath it: after a history
+// rewrite every stale branch reads as the whole pre-rewrite history — bead/fw-ax2
+// showed 23 "unmerged commits" and zero work — and is permanently un-sweepable,
+// which is the lock #50 removed, back by another door (fw-web). A rewrite
+// preserves every tree, so a branch that added nothing has the same tree as some
+// commit on main between the merge-base and today's head: the merge-base itself
+// in the ordinary case, the rewritten twin of its old tip after a rewrite. The
+// window starts at the merge-base on purpose — matching an *older* main tree
+// would mean the branch deleted something main still has, and that is work.
 func clearEmptyBranch(repoPath, base, branch string) error {
 	if err := git2(repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
 		return nil // no such branch; nothing to clear
 	}
-	// Any worktree still holding it is a live builder, not a leftover.
+	// Any worktree still holding it is a live builder, not a leftover. Not
+	// being able to list worktrees is not evidence that there are none.
 	out, err := inDir(repoPath, "git", "worktree", "list", "--porcelain").Output()
-	if err == nil && strings.Contains(string(out), "branch refs/heads/"+branch+"\n") {
+	if err != nil {
+		return fmt.Errorf("worktree: cannot list worktrees, so cannot tell whether %s is live; not touching it", branch)
+	}
+	if strings.Contains(string(out), "branch refs/heads/"+branch+"\n") {
 		return fmt.Errorf("worktree: %s is checked out in another worktree — "+
 			"a builder may still be running; not touching it", branch)
 	}
-	n := commitsSince(repoPath, base, branch)
-	if n > 0 {
-		return fmt.Errorf("worktree: %s already exists with %d unmerged commit(s) — "+
-			"refusing to delete an agent's work; merge or drop it by hand", branch, n)
+	if base == "" {
+		return fmt.Errorf("worktree: %s already exists and no base commit was recorded to judge it against; not touching it", branch)
 	}
-	if err := git2(repoPath, "branch", "-D", branch); err != nil {
-		return fmt.Errorf("worktree: could not clear the empty leftover %s: %w", branch, err)
+	mb := gitLine(repoPath, "merge-base", base, branch)
+	if mb == "" {
+		return fmt.Errorf("worktree: %s already exists and shares no history with %s — "+
+			"refusing to guess whether it is work; merge or drop it by hand", branch, base)
 	}
-	return nil
+	tree := gitLine(repoPath, "rev-parse", branch+"^{tree}")
+	if tree != "" && mainHasTree(repoPath, mb, base, tree) {
+		if err := git2(repoPath, "branch", "-D", branch); err != nil {
+			return fmt.Errorf("worktree: could not clear the empty leftover %s: %w", branch, err)
+		}
+		return nil
+	}
+	// Count against base, not the merge-base: after a rewrite the merge-base
+	// sits behind everything that was rewritten, and the count would include
+	// files main already has. A count of zero means git could not tell us.
+	if n := filesBetween(repoPath, base, branch); n > 0 {
+		return fmt.Errorf("worktree: %s already exists with %d file(s) changed against %s — "+
+			"refusing to delete an agent's work; merge or drop it by hand", branch, n, base)
+	}
+	return fmt.Errorf("worktree: %s already exists with content %s does not have — "+
+		"refusing to delete an agent's work; merge or drop it by hand", branch, base)
+}
+
+// mainHasTree reports whether tree is the tree of mb or of any commit on
+// mb..base — i.e. whether main already holds exactly this content.
+func mainHasTree(dir, mb, base, tree string) bool {
+	// mb gets its own check: `--not mb` excludes it, and `mb^..base` would
+	// fail whenever the merge-base is a root commit.
+	if gitLine(dir, "rev-parse", mb+"^{tree}") == tree {
+		return true
+	}
+	out, err := inDir(dir, "git", "log", "--format=%T", base, "--not", mb).Output()
+	if err != nil {
+		return false
+	}
+	for _, t := range strings.Fields(string(out)) {
+		if t == tree {
+			return true
+		}
+	}
+	return false
+}
+
+// filesBetween counts the paths that differ between two revisions; the number
+// in a refusal, so a human sees the size of the work rather than a SHA count
+// that a rewrite can inflate.
+func filesBetween(dir, from, to string) int {
+	out, err := inDir(dir, "git", "diff", "--name-only", from, to).Output()
+	if err != nil {
+		return 0
+	}
+	return len(strings.Fields(string(out)))
+}
+
+// gitLine runs a git command expected to print one line and returns it
+// trimmed, or "" on any failure.
+func gitLine(dir string, args ...string) string {
+	out, err := inDir(dir, "git", args...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // fleetWidth is how many builders to run at once: as many as there are repos
