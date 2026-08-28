@@ -17,11 +17,12 @@ Reconcile. `bd gate check` closes the *gate* when its PR merges and releases wha
 it blocked — back into `bd ready`. Proven on fw-62j: PR 24 merged, the gate
 closed, fw-fsa.9 became ready, not closed. A gate says "do not start until X
 lands"; this needs "X landed, so this is done". `fleet reconcile-board` closes
-every open or in-progress bead that a merged PR names (branch `bead/<id>` or the
-id in the title), with the PR as the close reason, and runs before every
-`allocate` and `run`. A bead with a merged PR and a still-open one is kept —
-that is a stack mid-review (ADR 0009). A gh failure is an error, never an empty
-list: "gh is down" must not read as "nothing merged".
+every open or in-progress bead that a merged PR names (branch `bead/<id>`, or
+titled `<id>: …` / `… (<id>)` — never a mid-title mention, which a builder
+could write to close a bead it never built), with the PR as the close reason,
+and runs before every `allocate` and `run`. A bead with a merged PR and a
+still-open one is kept — a stack mid-review (ADR 0009). A gh failure is an
+error and the plan is refused: "gh is down" must not read as "nothing merged".
 
 ## Consequences
 
