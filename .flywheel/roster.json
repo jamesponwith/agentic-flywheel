@@ -46,6 +46,16 @@
       ]
     },
     {
+      "name": "spotify-recsys-ecosystem",
+      "path": "Spotify",
+      "lang": "python",
+      "_note": "A five-app monorepo, not one project. Its own gate is 'make lint-all' plus six pytest suites and takes minutes, so pre-commit runs only the fast checks and the heavy ones stay on demand. Several open beads are corrections to already-published pages, which is why the safety rails went in before the fleet was pointed at it.",
+      "skip_stages": [
+        "operate",
+        "release"
+      ]
+    },
+    {
       "name": "flywheel-template",
       "path": "flywheel-template",
       "lang": "go",
@@ -78,7 +88,8 @@
       "name": "fleet/builder-py",
       "role": "builder",
       "repos": [
-        "brax-tennis-rl"
+        "brax-tennis-rl",
+        "spotify-recsys-ecosystem"
       ],
       "skills": [
         "python",
