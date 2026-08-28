@@ -6,12 +6,20 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // finding builds one ledger line with the given disposition. The other fields
 // are fixed because none of them affect the arithmetic under test.
 func finding(disposition string) string {
-	return `{"ts":"2026-08-17T01:32:34Z","commit":"6c77519","branch":"bead/fw-x","repo":"r",` +
+	return findingAt("2026-08-17T01:32:34Z", disposition)
+}
+
+// findingAt is finding with the timestamp chosen, for tests that need lines
+// which are distinct events rather than byte-identical repeats — readLedger
+// collapses the latter (fw-c48).
+func findingAt(ts, disposition string) string {
+	return `{"ts":"` + ts + `","commit":"6c77519","branch":"bead/fw-x","repo":"r",` +
 		`"lens":"correctness","file":"a.go","line":"1","severity":"medium",` +
 		`"claim":"a claim","disposition":"` + disposition + `"}`
 }
@@ -34,10 +42,13 @@ func ledgerRepo(t *testing.T, lines ...string) Repo {
 
 func dispositions(t *testing.T, counts map[string]int) []ReviewFinding {
 	t.Helper()
+	// Each line gets its own ts: these are N separate findings, and the reader
+	// deliberately collapses byte-identical repeats into one.
 	var lines []string
 	for _, d := range []string{"accepted", "rejected", "ignored", "reviewed-later", ""} {
 		for i := 0; i < counts[d]; i++ {
-			lines = append(lines, finding(d))
+			ts := time.Date(2026, 8, 17, 1, 0, 0, 0, time.UTC).Add(time.Duration(len(lines)) * time.Second)
+			lines = append(lines, findingAt(ts.Format(time.RFC3339), d))
 		}
 	}
 	repo := ledgerRepo(t, lines...)
@@ -201,6 +212,63 @@ func TestReadLedgerToleratesBlankAndCorruptLines(t *testing.T) {
 	}
 	if fs[0].Disposition != "accepted" || fs[1].Disposition != "rejected" {
 		t.Errorf("dispositions = %q/%q, want accepted/rejected", fs[0].Disposition, fs[1].Disposition)
+	}
+}
+
+func TestReadLedgerDeduplicatesWholeLinesOnly(t *testing.T) {
+	// review.jsonl is merge=union and git's union driver concatenates without
+	// deduplicating, so a finding recorded on a branch shows up twice after
+	// that branch merges. Two byte-identical lines are one finding. But two
+	// findings that differ only in ts are two — the same claim at the same
+	// place in two different runs — so the key must be the whole line, not
+	// (lens, file, line) (fw-c48).
+	tests := []struct {
+		name  string
+		lines []string
+		want  int
+	}{
+		{
+			name:  "a byte-identical pair counts once",
+			lines: []string{finding("accepted"), finding("accepted")},
+			want:  1,
+		},
+		{
+			name: "a pair differing only in ts counts twice",
+			lines: []string{
+				findingAt("2026-08-17T01:32:34Z", "accepted"),
+				findingAt("2026-08-18T01:32:34Z", "accepted"),
+			},
+			want: 2,
+		},
+		{
+			name: "a repeat separated by other lines still counts once",
+			lines: []string{
+				finding("accepted"),
+				findingAt("2026-08-18T01:32:34Z", "rejected"),
+				finding("accepted"),
+			},
+			want: 2,
+		},
+		{
+			name:  "surrounding whitespace does not make a new finding",
+			lines: []string{finding("accepted"), "  " + finding("accepted") + "\t"},
+			want:  1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := ledgerRepo(t, tt.lines...)
+			fs, err := readLedger(filepath.Join(repo.Path, ".flywheel", "review.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(fs) != tt.want {
+				t.Errorf("read %d finding(s), want %d", len(fs), tt.want)
+			}
+			if got := rate(fs).Total; got != tt.want {
+				t.Errorf("rate Total = %d, want %d — the denominator is what the duplicate inflates", got, tt.want)
+			}
+		})
 	}
 }
 
