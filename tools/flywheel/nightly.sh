@@ -122,7 +122,15 @@ run)
        && [ "$secs" -gt 0 ]; then
       # +60s: waking exactly on the boundary races the reset and buys another
       # 429, which would schedule another wakeup for the same instant.
+      # --setenv=PATH is the whole point of this line. systemd-run builds a
+      # TRANSIENT unit, which inherits nothing from the installed
+      # flywheel-nightly.service — so the PATH captured at install time does
+      # not reach the resume, and the first one ever scheduled died with
+      # "'go' is not on PATH" at exit 127. The timer was fixed and the thing
+      # the timer schedules was not.
       systemd-run --user --on-active="$((secs + 60))s" \
+        --setenv="PATH=$PATH" \
+        --working-directory="$PWD" \
         --unit="flywheel-resume-$(date -u +%Y%m%dT%H%M%SZ)" \
         "$PWD/tools/flywheel/nightly.sh" run >/dev/null 2>&1 &&
         echo "quota hold until $until_ts — resuming automatically in $(( (secs + 60) / 60 ))m"
