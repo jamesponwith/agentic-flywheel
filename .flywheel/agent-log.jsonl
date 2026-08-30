@@ -77,3 +77,5 @@
 {"ts":"2026-08-28T16:50:12Z","event":"push.refused","agent":"fleet/doctor-probe","repo":"agentic-flywheel","refs":"main"}
 {"ts":"2026-08-28T16:53:58Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-e6c","bead":"fw-e6c"}
 {"ts":"2026-08-28T17:00:56Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-e6c","bead":"fw-e6c","pr":"74"}
+{"ts":"2026-08-28T17:01:47Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-55c","bead":"fw-55c"}
+{"ts":"2026-08-28T17:07:01Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-55c","bead":"fw-55c","pr":"75"}

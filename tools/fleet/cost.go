@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -151,15 +152,27 @@ func ReadSpend(repo Repo, since time.Time) (Spend, error) {
 				greenBeads[k.bead]++
 			}
 		}
+		// The ledger's only numeric validation. guard.sh's json_pairs quotes
+		// whatever it is given and `guard.sh log bead.cost usd=NaN` is an
+		// allowlisted call for any unattended agent: ParseFloat accepts NaN and
+		// ±Inf, encoding/json refuses to render them, and one such line makes
+		// `fleet cost -json` — and so docs/fleet.json — unrenderable. A
+		// negative parses fine and instead drives FleetWindowSpend down while
+		// it still answers ok=true, the headroom-from-nothing reading its own
+		// doc comment forbids. A rejected value is unmeasured, not zero
+		// (fw-55c).
+		//
+		// `f >= 0` is false for NaN. The overflow test is on the SUM, not the
+		// value: two finite 1e308 lines add to +Inf just as surely as one Inf.
 		measured := false
 		if v, ok := e["usd"]; ok {
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
+			if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && !math.IsInf(sp.USD+f, 0) {
 				sp.USD += f
 				measured = true
 			}
 		}
 		if v, ok := e["tokens"]; ok {
-			if n, err := strconv.Atoi(v); err == nil {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= math.MaxInt-sp.Tokens {
 				sp.Tokens += n
 				measured = true
 			}
