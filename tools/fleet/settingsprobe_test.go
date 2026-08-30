@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,11 +34,39 @@ func writeSettings(t *testing.T, repo, content string) {
 	}
 }
 
+// fullGrant is every rule a Go builder needs, one per capability, so a row
+// can drop or swap exactly the one it is about.
+var fullGrant = []string{
+	"Bash(bd:*)", "Bash(tools/flywheel/guard.sh:*)", "Write", "Edit",
+	"Bash(git add:*)", "Bash(git commit:*)", "Bash(git push:*)", "Bash(gh pr create:*)", "Bash(go test:*)",
+}
+
+// settingsWith builds a settings.json from a permissions block.
+func settingsWith(t *testing.T, p permissions) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"permissions": p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// without is fullGrant minus the named rules.
+func without(drop ...string) []string {
+	var out []string
+	for _, r := range fullGrant {
+		skip := false
+		for _, d := range drop {
+			skip = skip || r == d
+		}
+		if !skip {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func TestProbeSettings(t *testing.T) {
-	// A file that grants every capability but one, for the per-capability cases.
-	const allButCommit = `{"permissions":{"allow":[
-		"Bash(bd:*)","Bash(tools/flywheel/guard.sh:*)","Write","Edit",
-		"Bash(git add:*)","Bash(git push:*)","Bash(gh pr create:*)","Bash(go test:*)"]}}`
 	tests := []struct {
 		name     string
 		settings string // "" = no file at all
@@ -70,53 +99,92 @@ func TestProbeSettings(t *testing.T) {
 		},
 		{
 			name:     "one capability short, and it names that one",
-			settings: allButCommit, lang: "go", want: false,
+			settings: settingsWith(t, permissions{Allow: without("Bash(git commit:*)")}),
+			lang:     "go", want: false,
 			wantWhy: "Bash(git commit) — cannot commit",
 			notWhy:  "Bash(bd)",
 		},
 		{
 			// A deny wins over an allow in the runner, so it wins here.
 			name:     "allowed then denied",
-			settings: `{"permissions":{"allow":["Bash"],"deny":["Bash(git commit:*)"]}}`,
+			settings: settingsWith(t, permissions{Allow: []string{"Bash"}, Deny: []string{"Bash(git commit:*)"}}),
 			lang:     "go", want: false,
 			wantWhy: "Bash(git commit)",
 		},
 		{
 			// The deny list in this very repo: a narrower deny does not cover
 			// the capability. Reporting it would be a permanent false gap.
-			name:     "a narrower deny does not revoke the capability",
-			settings: `{"permissions":{"allow":["Bash","Write","Edit"],"deny":["Bash(git push --force:*)","Bash(git push origin main:*)"]}}`,
-			lang:     "go", want: true,
+			name: "a narrower deny does not revoke the capability",
+			settings: settingsWith(t, permissions{Allow: []string{"Bash", "Write", "Edit"},
+				Deny: []string{"Bash(git push --force:*)", "Bash(git push origin main:*)"}}),
+			lang: "go", want: true,
+		},
+		{
+			// ADR 0015: builders do not write under .claude/. A repo that
+			// enforces it with a scoped deny still grants Write and Edit
+			// everywhere else, and nagging it to drop the deny is backwards.
+			name: "a scoped deny on Write or Edit is a guard, not a revocation",
+			settings: settingsWith(t, permissions{Allow: fullGrant,
+				Deny: []string{"Write(.claude/**)", "Edit(.claude/**)"}}),
+			lang: "go", want: true,
+		},
+		{
+			// The other direction: a Write scoped to src/ cannot touch .beads
+			// or the outbox — present but powerless, one rule at a time.
+			name:     "a scoped allow on Write is not a grant",
+			settings: settingsWith(t, permissions{Allow: append(without("Write"), "Write(src/**)")}),
+			lang:     "go", want: false,
+			wantWhy: "Write — cannot create a file",
+			notWhy:  "Edit",
 		},
 		{
 			// `Bash(git:*)` reaches `git commit`; a bare `Bash` reaches all.
-			name:     "a broader allow covers the capability",
-			settings: `{"permissions":{"allow":["Bash(bd:*)","Bash(tools/flywheel/guard.sh:*)","Write","Edit","Bash(git:*)","Bash(gh:*)","Bash(go:*)"]}}`,
+			name: "a broader allow covers the capability",
+			settings: settingsWith(t, permissions{Allow: []string{"Bash(bd:*)", "Bash(tools/flywheel/guard.sh:*)",
+				"Write", "Edit", "Bash(git:*)", "Bash(gh:*)", "Bash(go:*)"}}),
+			lang: "go", want: true,
+		},
+		{
+			// defaultMode grants without an allow entry: acceptEdits is
+			// Write and Edit, bypassPermissions is everything.
+			name:     "acceptEdits grants the edit tools",
+			settings: settingsWith(t, permissions{Allow: without("Write", "Edit"), DefaultMode: "acceptEdits"}),
 			lang:     "go", want: true,
+		},
+		{
+			name:     "bypassPermissions grants everything",
+			settings: settingsWith(t, permissions{DefaultMode: "bypassPermissions"}),
+			lang:     "go", want: true,
+		},
+		{
+			name:     "a deny still wins under bypassPermissions",
+			settings: settingsWith(t, permissions{DefaultMode: "bypassPermissions", Deny: []string{"Bash(gh pr create:*)"}}),
+			lang:     "go", want: false,
+			wantWhy: "Bash(gh pr create)",
 		},
 		{
 			// The Go runner granted in a Python repo is the wrong gate.
 			name:     "the test runner is per language",
-			settings: allButCommit, lang: "python", want: false,
+			settings: settingsWith(t, permissions{Allow: fullGrant}), lang: "python", want: false,
 			wantWhy: "Bash(uv run pytest) — cannot run the gate",
 		},
 		{
 			// Either spelling of the Python gate will do.
 			name:     "any of the language's runners will do",
-			settings: `{"permissions":{"allow":["Bash(bd:*)","Bash(tools/flywheel/guard.sh:*)","Write","Edit","Bash(git add:*)","Bash(git commit:*)","Bash(git push:*)","Bash(gh pr create:*)","Bash(pytest:*)"]}}`,
+			settings: settingsWith(t, permissions{Allow: append(without("Bash(go test:*)"), "Bash(pytest:*)")}),
 			lang:     "python", want: true,
 		},
 		{
 			// An unknown language has no runner to ask for; do not invent one.
 			name:     "an unknown language is not asked for a runner",
-			settings: `{"permissions":{"allow":["Bash(bd:*)","Bash(tools/flywheel/guard.sh:*)","Write","Edit","Bash(git add:*)","Bash(git commit:*)","Bash(git push:*)","Bash(gh pr create:*)"]}}`,
+			settings: settingsWith(t, permissions{Allow: without("Bash(go test:*)")}),
 			lang:     "rust", want: true,
 		},
 		{
 			// An exact rule is not a prefix: `Bash(git commit)` grants the bare
 			// command only, and a builder always passes -m.
 			name:     "an exact rule for the bare command still counts",
-			settings: `{"permissions":{"allow":["Bash(bd:*)","Bash(tools/flywheel/guard.sh:*)","Write","Edit","Bash(git add:*)","Bash(git commit)","Bash(git push:*)","Bash(gh pr create:*)","Bash(go test:*)"]}}`,
+			settings: settingsWith(t, permissions{Allow: append(without("Bash(git commit:*)"), "Bash(git commit)")}),
 			lang:     "go", want: true,
 		},
 	}
@@ -172,6 +240,30 @@ func TestDiagnoseWillNotSayCompleteOverAPowerlessSettings(t *testing.T) {
 	}
 }
 
+// The second of fw-7al's three gaps: present on disk, gitignored. That is the
+// manifest's finding — a clone would not get it — and the probe must not read
+// the untracked file off disk and call the repo working over the top of it.
+func TestDiagnoseReportsAnUntrackedSettingsAsMissingNotWorking(t *testing.T) {
+	t.Setenv("CI", "true")
+
+	r := fullRepo(t)
+	for _, a := range [][]string{{"rm", "-q", "--cached", settingsPath}, {"commit", "-qm", "untrack"}} {
+		if out, err := inDir(r.Path, "git", a...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	d := Diagnose(r)
+
+	if !missingPaths(d)[settingsPath] {
+		t.Errorf("an untracked settings.json was not reported missing: %v", d.Missing)
+	}
+	for _, p := range d.Probes {
+		if p.Name == "settings grants" {
+			t.Errorf("probed a file a clone would not have, and said %q", p.Why)
+		}
+	}
+}
+
 func TestCovers(t *testing.T) {
 	tests := []struct {
 		rule, tool, cmd string
@@ -186,7 +278,7 @@ func TestCovers(t *testing.T) {
 		{"Bash(gitk:*)", "Bash", "git commit", false},
 		{"Bash(go test:*)", "Bash", "gofmt", false},
 		{"Write", "Write", "", true},
-		{"Write(src/**)", "Write", "", true},
+		{"Write(src/**)", "Write", "", false}, // scoped: neither a full grant nor a revocation
 		{"Edit", "Write", "", false},
 		{"Bash(git commit:*", "Bash", "git commit", false}, // unbalanced: not a rule
 		{"mcp__blackbird__blackbird_agent_register", "Bash", "bd", false},

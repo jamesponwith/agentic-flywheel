@@ -16,16 +16,15 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// settingsPath is the one file the spawned runner reads for permissions.
-// settings.local.json is gitignored and a spawner's worktree never has it, so
-// a grant there helps a human at a terminal and nobody else.
+// settingsPath is the one file in the checkout the spawned runner reads for
+// permissions. settings.local.json is gitignored and a spawner's worktree
+// never has it, so a grant there helps a human at a terminal and nobody else.
 const settingsPath = ".claude/settings.json"
 
 // capability is one thing flywheel-next invokes. Tool is the permission-rule
@@ -60,6 +59,16 @@ var testRunners = map[string][]string{
 	"python": {"uv run pytest", "pytest"},
 }
 
+// permissions is the slice of settings.json the runner decides with.
+type permissions struct {
+	Allow []string `json:"allow"`
+	Deny  []string `json:"deny"`
+	// DefaultMode changes what an empty allow list means: bypassPermissions
+	// grants everything, acceptEdits grants Write and Edit. Reading only the
+	// lists would report both as powerless when they are the opposite.
+	DefaultMode string `json:"defaultMode"`
+}
+
 // probeSettings reports whether repoPath's settings.json grants what a builder
 // needs, naming each capability it does not. lang picks the test runner; an
 // unknown language checks everything but the runner.
@@ -69,10 +78,7 @@ func probeSettings(repoPath, lang string) (bool, string) {
 		return false, "no " + settingsPath + " — the runner grants nothing without one"
 	}
 	var s struct {
-		Permissions struct {
-			Allow []string `json:"allow"`
-			Deny  []string `json:"deny"`
-		} `json:"permissions"`
+		Permissions permissions `json:"permissions"`
 	}
 	if err := json.Unmarshal(b, &s); err != nil {
 		return false, settingsPath + " is not valid JSON: " + err.Error()
@@ -80,14 +86,14 @@ func probeSettings(repoPath, lang string) (bool, string) {
 
 	var missing []string
 	for _, c := range required {
-		if !granted(s.Permissions.Allow, s.Permissions.Deny, c.Tool, c.Cmd) {
+		if !s.Permissions.grants(c.Tool, c.Cmd) {
 			missing = append(missing, describe(c))
 		}
 	}
 	if runners, ok := testRunners[lang]; ok {
 		found := false
 		for _, r := range runners {
-			if granted(s.Permissions.Allow, s.Permissions.Deny, "Bash", r) {
+			if s.Permissions.grants("Bash", r) {
 				found = true
 				break
 			}
@@ -109,15 +115,23 @@ func describe(c capability) string {
 	return fmt.Sprintf("%s(%s) — %s", c.Tool, c.Cmd, c.Why)
 }
 
-// granted reports whether the allow list covers tool+cmd and the deny list
-// does not. A deny that covers the capability wins, as it does in the runner.
-func granted(allow, deny []string, tool, cmd string) bool {
-	for _, r := range deny {
+// grants reports whether tool+cmd is allowed and not denied. A deny that
+// covers the capability wins, as it does in the runner.
+func (p permissions) grants(tool, cmd string) bool {
+	for _, r := range p.Deny {
 		if covers(r, tool, cmd) {
 			return false
 		}
 	}
-	for _, r := range allow {
+	switch p.DefaultMode {
+	case "bypassPermissions":
+		return true
+	case "acceptEdits":
+		if tool == "Write" || tool == "Edit" {
+			return true
+		}
+	}
+	for _, r := range p.Allow {
 		if covers(r, tool, cmd) {
 			return true
 		}
@@ -125,41 +139,42 @@ func granted(allow, deny []string, tool, cmd string) bool {
 	return false
 }
 
-// covers reports whether one permission rule reaches the capability.
+// covers reports whether one permission rule reaches the whole capability.
 //
 // Rules are `Tool` or `Tool(spec)`. A bare tool covers every use of it. For
 // Bash, `spec` is either an exact command or `prefix:*`; a prefix covers the
 // command when it IS the command or is a leading run of its words, so
 // `Bash(git:*)` covers `git commit` and `Bash(git push --force:*)` does not
-// cover `git push`. For tools without a command, any rule for the tool counts.
+// cover `git push`.
+//
+// For tools that take no command, only the bare rule counts either way. A
+// scoped allow like `Write(src/**)` leaves a builder unable to write .beads or
+// the outbox — powerless where it matters, the shape this probe exists to
+// catch — and a scoped deny like `Edit(.claude/**)` is the ADR 0015 guard, not
+// a revocation; reading it as one would nag a repo into deleting it.
 //
 // ponytail: the runner's own prefix match is by string, not by word, so a
-// `Bash(g:*)` rule would grant `git commit` there and read as absent here.
-// Nobody writes that rule; treating it as absent is the safe direction.
+// `Bash(g:*)` rule would grant `git commit` there and read as absent here;
+// and a `*` inside a Bash spec is a glob to the runner and a literal here.
+// Nobody in the roster writes either; absent is the safe direction for both.
 func covers(rule, tool, cmd string) bool {
-	ruleTool, spec, err := splitRule(rule)
-	if err != nil || ruleTool != tool {
+	rule = strings.TrimSpace(rule)
+	ruleTool, spec := rule, ""
+	if i := strings.IndexByte(rule, '('); i >= 0 {
+		if !strings.HasSuffix(rule, ")") {
+			return false // not a rule the runner would honour either
+		}
+		ruleTool, spec = rule[:i], rule[i+1:len(rule)-1]
+	}
+	if ruleTool != tool {
 		return false
 	}
 	if spec == "" || cmd == "" {
-		return true
+		return spec == ""
 	}
 	if p, ok := strings.CutSuffix(spec, ":*"); ok {
 		p = strings.TrimSpace(p)
 		return p == cmd || strings.HasPrefix(cmd, p+" ")
 	}
 	return spec == cmd
-}
-
-// splitRule parses `Tool` or `Tool(spec)`.
-func splitRule(rule string) (tool, spec string, err error) {
-	rule = strings.TrimSpace(rule)
-	i := strings.IndexByte(rule, '(')
-	if i < 0 {
-		return rule, "", nil
-	}
-	if !strings.HasSuffix(rule, ")") {
-		return "", "", errors.New("unbalanced rule: " + rule)
-	}
-	return rule[:i], rule[i+1 : len(rule)-1], nil
 }
