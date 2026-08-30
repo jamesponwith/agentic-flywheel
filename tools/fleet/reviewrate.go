@@ -89,6 +89,10 @@ func readLedger(path string) ([]ReviewFinding, error) {
 	defer f.Close()
 
 	var out []ReviewFinding
+	// ponytail: the whole set of distinct lines is held in memory, as in
+	// ReadSpend; at hundreds of records that is nothing. If it ever matters,
+	// key on a hash of the line instead of the line.
+	seen := map[string]bool{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 1<<20) // claims run long
 	for sc.Scan() {
@@ -96,6 +100,15 @@ func readLedger(path string) ([]ReviewFinding, error) {
 		if len(line) == 0 {
 			continue
 		}
+		// A byte-identical repeat is the same finding, not a second one: this
+		// ledger is merge=union and git's union driver concatenates without
+		// deduplicating, so counting it twice inflates Total — the mirror of
+		// fw-6gc in ReadSpend (fw-c48). Whole line, not (lens, file, line):
+		// the same claim raised in two runs differs in ts and IS two findings.
+		if seen[string(line)] {
+			continue
+		}
+		seen[string(line)] = true
 		var fd ReviewFinding
 		// ponytail: a malformed line is skipped, not counted, matching
 		// ReadSpend — one bad line must not lose the whole ledger. guard.sh's
