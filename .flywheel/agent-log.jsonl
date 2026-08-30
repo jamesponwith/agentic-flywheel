@@ -77,3 +77,9 @@
 {"ts":"2026-08-28T16:50:12Z","event":"push.refused","agent":"fleet/doctor-probe","repo":"agentic-flywheel","refs":"main"}
 {"ts":"2026-08-30T09:30:59Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-7al","bead":"fw-7al"}
 {"ts":"2026-08-30T09:39:47Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-7al","bead":"fw-7al","pr":"77"}
+{"ts":"2026-08-28T16:53:58Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-e6c","bead":"fw-e6c"}
+{"ts":"2026-08-28T17:00:56Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-e6c","bead":"fw-e6c","pr":"74"}
+{"ts":"2026-08-28T20:52:19Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-c48","bead":"fw-c48"}
+{"ts":"2026-08-28T20:56:07Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-c48","bead":"fw-c48","pr":"76"}
+{"ts":"2026-08-28T17:01:47Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-55c","bead":"fw-55c"}
+{"ts":"2026-08-28T17:07:01Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-55c","bead":"fw-55c","pr":"75"}

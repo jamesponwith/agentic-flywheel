@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,6 +134,83 @@ func TestReadSpendSurvivesACorruptLine(t *testing.T) {
 	}
 	if sp.USD != 3.0 {
 		t.Errorf("USD = %v, want 3.0 — a corrupt line lost real entries", sp.USD)
+	}
+}
+
+func TestReadSpendRefusesNonFiniteAndNegativeCost(t *testing.T) {
+	// `guard.sh log bead.cost usd=NaN` is allowlisted for any unattended agent
+	// and json_pairs validates nothing, so the reader is the only place the
+	// ledger's numbers are checked. A rejected value must read as unmeasured —
+	// not as zero, and not as a negative that FleetWindowSpend would report as
+	// headroom — and the -json rendering must survive it (fw-55c).
+	cost := func(v string) string {
+		return `{"ts":"2026-08-16T10:00:00Z","event":"bead.cost","bead":"fw-x",` + v + `}`
+	}
+	for _, tc := range []struct {
+		name     string
+		lines    []string
+		measured bool
+		usd      float64
+		tokens   int
+	}{
+		{name: "NaN", lines: []string{cost(`"usd":"NaN"`)}},
+		{name: "Inf", lines: []string{cost(`"usd":"Inf"`)}},
+		{name: "+Inf", lines: []string{cost(`"usd":"+Inf"`)}},
+		{name: "Infinity", lines: []string{cost(`"usd":"Infinity"`)}},
+		{name: "-Inf", lines: []string{cost(`"usd":"-Inf"`)}},
+		{name: "overflow by syntax", lines: []string{cost(`"usd":"1e309"`)}},
+		{name: "negative usd", lines: []string{cost(`"usd":"-1e308"`)}},
+		{name: "negative tokens", lines: []string{cost(`"tokens":"-9000000"`)}},
+		{
+			// Each line is finite on its own; the sum is not. Distinct ts so
+			// whole-line deduplication does not collapse them first.
+			name: "finite lines whose sum overflows",
+			lines: []string{
+				cost(`"usd":"1.7e308"`),
+				`{"ts":"2026-08-16T11:00:00Z","event":"bead.cost","bead":"fw-x","usd":"1.7e308"}`,
+			},
+			measured: true, usd: 1.7e308,
+		},
+		{
+			name: "token sum wraps",
+			lines: []string{
+				cost(`"tokens":"9223372036854775807"`),
+				`{"ts":"2026-08-16T11:00:00Z","event":"bead.cost","bead":"fw-x","tokens":"9223372036854775807"}`,
+			},
+			measured: true, tokens: 9223372036854775807,
+		},
+		{
+			// One bad field does not take the good one with it: the tokens are
+			// a measurement even when the dollars are junk.
+			name:     "bad usd beside good tokens",
+			lines:    []string{cost(`"usd":"NaN","tokens":"900"`)},
+			measured: true, tokens: 900,
+		},
+		{
+			// Zero is a real measurement — a run that cost nothing — and must
+			// not be swept up with the refusals.
+			name:     "zero",
+			lines:    []string{cost(`"usd":"0","tokens":"0"`)},
+			measured: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := logRepo(t, tc.lines...)
+			sp, err := ReadSpend(repo, time.Time{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sp.Measured != tc.measured || sp.USD != tc.usd || sp.Tokens != tc.tokens {
+				t.Errorf("spend = measured %v, $%v, %d tokens; want %v, $%v, %d",
+					sp.Measured, sp.USD, sp.Tokens, tc.measured, tc.usd, tc.tokens)
+			}
+			if _, err := json.Marshal(sp); err != nil {
+				t.Errorf("fleet cost -json cannot render this spend: %v", err)
+			}
+			if usd, ok, _ := FleetWindowSpend(Roster{Repos: []Repo{repo}}, time.Time{}); usd != tc.usd || ok != tc.measured {
+				t.Errorf("FleetWindowSpend = $%v (ok=%v), want $%v (ok=%v)", usd, ok, tc.usd, tc.measured)
+			}
+		})
 	}
 }
 
