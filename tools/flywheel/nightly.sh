@@ -115,9 +115,17 @@ run)
   # waits hours for a real reset, the review-weight budget refuses to dispatch
   # while PRs sit unreviewed (ADR 0009), and guard.sh stops everything.
   # To break it by hand: systemctl --user stop 'flywheel-resume-*'.
-  hold=".flywheel/quota-hold"
-  if [ -f "$hold" ] && command -v systemd-run >/dev/null 2>&1; then
-    until_ts=$(head -1 "$hold")
+  # Every repo in the roster, not just this one. noteRateLimit writes the hold
+  # into the repo whose builder hit the wall, so a Spotify builder's 429 lands
+  # in Spotify's .flywheel/quota-hold — and reading only our own found a
+  # two-day-old expired hold, computed a negative delay, and scheduled nothing.
+  # The fleet then sat until a person noticed, which is the outage the hold
+  # exists to prevent, reached by a different route.
+  #
+  # Earliest FUTURE hold wins: the account is one pool, so the first reset is
+  # when work can start again wherever it was blocked.
+  until_ts=$(go run ./tools/fleet holds -roster "$ROSTER" 2>/dev/null | head -1)
+  if [ -n "$until_ts" ] && command -v systemd-run >/dev/null 2>&1; then
     if secs=$(( $(date -u -d "$until_ts" +%s 2>/dev/null || echo 0) - $(date -u +%s) )) \
        && [ "$secs" -gt 0 ]; then
       # +60s: waking exactly on the boundary races the reset and buys another

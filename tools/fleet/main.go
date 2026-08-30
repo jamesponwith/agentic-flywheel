@@ -100,6 +100,14 @@ func main() {
 		err = doDoctor(*rosterPath, *source, *fix, *asJSON, *self)
 	case "run":
 		err = doRun(*rosterPath, *execute, *perBuilder, *onlyBead, *asJSON)
+	case "holds":
+		// Prints the earliest future quota hold across the roster, or nothing.
+		// nightly.sh needs it to schedule its own resume: the hold lands in the
+		// repo whose builder hit the wall, not necessarily this one.
+		var r Roster
+		if r, err = LoadRoster(*rosterPath); err == nil {
+			err = cmdHolds(r)
+		}
 	default:
 		usage()
 		os.Exit(2)
