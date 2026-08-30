@@ -72,11 +72,19 @@ const (
 // where the repo has declared it has no use for the agents stage — a template
 // before rollout has no guard to fire.
 func probes(repo Repo) []Probe {
-	if os.Getenv("CI") != "" || repo.skips("agents") {
+	if repo.skips("agents") {
 		return nil
 	}
-	ok, why := probeGuard(repo.Path)
-	return []Probe{{Name: "push guard", OK: ok, Why: why}}
+	var out []Probe
+	if os.Getenv("CI") == "" {
+		ok, why := probeGuard(repo.Path)
+		out = append(out, Probe{Name: "push guard", OK: ok, Why: why})
+	}
+	// settings.json is tracked and read from the checkout, so a CI clone sees
+	// exactly what a spawned builder sees — this probe holds where the hook
+	// one cannot, and drift.yml is where a powerless file should surface.
+	ok, why := probeSettings(repo.Path, repo.Lang)
+	return append(out, Probe{Name: "settings grants", OK: ok, Why: why})
 }
 
 // probeGuard reports whether repoPath's installed pre-push hook enforces

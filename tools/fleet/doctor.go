@@ -65,6 +65,10 @@ var Manifest = []Artifact{
 	{"tools/flywheel/flaky.sh", "validate", false, "", "tells a flaky test from a broken one, and puts a deadline on it", false, false},
 	{".claude/skills/flywheel-next", "agents", false, "", "the unit of autonomous work", false, false},
 	{".claude/skills/flywheel-review", "agents", false, "", "three-lens review panel", false, false},
+	// NeedsAdaptation: the allow list names the repo's own gate and the deny
+	// list is its policy. A copied one that names the wrong runner would fail
+	// the settings probe on the next run, but better not to install it at all.
+	{".claude/settings.json", "agents", false, "", "the permissions a spawned builder runs under; without them it fails closed", false, true},
 	{".flywheel/README.md", "agents", false, "", "explains the local agent state directory", false, false},
 }
 
