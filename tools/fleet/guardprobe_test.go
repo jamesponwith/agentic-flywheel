@@ -200,7 +200,9 @@ func refsOf(t *testing.T, dir string) string {
 }
 
 // fullRepo has every artifact the manifest asks of a Go instance, so Missing is
-// empty and the headline is decided by the probe alone.
+// empty and the headline is decided by the probes alone. settings.json is this
+// repo's real one, for the same reason hookOf uses the real push-guard.sh: a
+// fixture that grants everything would pass a probe the shipped file failed.
 func fullRepo(t *testing.T) Repo {
 	t.Helper()
 	var paths []string
@@ -210,7 +212,9 @@ func fullRepo(t *testing.T) Repo {
 		}
 		paths = append(paths, a.Path)
 	}
-	return repoWith(t, paths...)
+	r := repoWith(t, paths...)
+	writeSettings(t, r.Path, realSettings(t))
+	return r
 }
 
 // A repo at full artifact parity with a dead guard must not read as complete.
@@ -256,10 +260,15 @@ func TestDiagnoseSaysCompleteWhenTheGuardFires(t *testing.T) {
 // Hooks are not installed in a CI checkout and never run there. Probing them
 // would report a gap the environment cannot have, and drift.yml would file the
 // same issue every Monday forever — the permanent false gap fw-fsa.8 is about.
+//
+// The settings probe is the exception: it reads a tracked file, which a CI
+// clone has exactly as a spawned builder does, so it runs everywhere.
 func TestProbesAreSkippedWhereHooksCannotRun(t *testing.T) {
 	t.Setenv("CI", "true")
-	if got := Diagnose(fullRepo(t)); len(got.Probes) != 0 {
-		t.Errorf("probed under CI: %v", got.Probes)
+	for _, p := range Diagnose(fullRepo(t)).Probes {
+		if p.Name == "push guard" {
+			t.Errorf("probed the hook under CI: %v", p)
+		}
 	}
 	if s := Diagnose(fullRepo(t)).String(); !strings.Contains(s, "complete (") {
 		t.Errorf("a CI checkout at parity must still read as parity:\n%s", s)

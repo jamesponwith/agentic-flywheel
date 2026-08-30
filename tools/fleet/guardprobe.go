@@ -63,20 +63,34 @@ const (
 	zeroOID       = "0000000000000000000000000000000000000000"
 )
 
-// probes runs the behavioural checks for a repo.
-//
-// Skipped under CI: hooks are not installed in a fresh checkout and never run
-// there, so probing them reports a gap the environment cannot have. That is the
-// permanent false gap that trains people to ignore a checklist (fw-fsa.8), and
-// in drift.yml it would file the same issue every Monday forever. Also skipped
-// where the repo has declared it has no use for the agents stage — a template
-// before rollout has no guard to fire.
+// probes runs the behavioural checks for a repo. Each probes an artifact that
+// present() already vouches for; absence is the manifest's finding, not
+// theirs. Skipped entirely where the repo has declared it has no use for the
+// agents stage — a template before rollout has no guard to fire.
 func probes(repo Repo) []Probe {
-	if os.Getenv("CI") != "" || repo.skips("agents") {
+	if repo.skips("agents") {
 		return nil
 	}
-	ok, why := probeGuard(repo.Path)
-	return []Probe{{Name: "push guard", OK: ok, Why: why}}
+	var out []Probe
+	// The hook probe is skipped under CI: hooks are not installed in a fresh
+	// checkout and never run there, so probing them reports a gap the
+	// environment cannot have. That is the permanent false gap that trains
+	// people to ignore a checklist (fw-fsa.8), and in drift.yml it would file
+	// the same issue every Monday forever.
+	if os.Getenv("CI") == "" {
+		ok, why := probeGuard(repo.Path)
+		out = append(out, Probe{Name: "push guard", OK: ok, Why: why})
+	}
+	// settings.json is tracked and read from the checkout, so a CI clone sees
+	// exactly what a spawned builder sees — this probe holds where the hook
+	// one cannot, and drift.yml is where a powerless file should surface.
+	// Gated on present(): a gitignored one is the manifest's gap, and reading
+	// it off disk anyway would call it working (the second of fw-7al's three).
+	if present(repo.Path, settingsPath) {
+		ok, why := probeSettings(repo.Path, repo.Lang)
+		out = append(out, Probe{Name: "settings grants", OK: ok, Why: why})
+	}
+	return out
 }
 
 // probeGuard reports whether repoPath's installed pre-push hook enforces
