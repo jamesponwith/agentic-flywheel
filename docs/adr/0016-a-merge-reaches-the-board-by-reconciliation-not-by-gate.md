@@ -24,6 +24,18 @@ and runs before every `allocate` and `run`. A bead with a merged PR and a
 still-open one is kept — a stack mid-review (ADR 0009). A gh failure is an
 error and the plan is refused: "gh is down" must not read as "nothing merged".
 
+Amended 2026-09-04 (fw-ojk): a merge only counts onto the repo's **default
+branch**, asked of gh rather than pinned anywhere. gh reports `MERGED` for a PR
+that landed anywhere, and spot-2ig was closed on a PR that went into
+`fleet/builder-permissions` — 1880 lines on a branch nobody will merge again,
+with the board saying done. A PR merged onto a non-default branch is reported as
+`merged-elsewhere`, naming the branch, and never closes; a bead already closed
+that way is reported as `closed-elsewhere` rather than reopened, because
+recovering that work is a human's call (ADR 0003). Falsely closed is worse than
+stale: stale costs a dispatch, false loses the work silently. The cost is that a
+stacked child merged into its parent's branch never closes itself — a wasted
+dispatch and a human `bd close`, deliberately the cheaper failure.
+
 ## Consequences
 
 The board cannot drift from main by more than one fleet cycle, with no change to
