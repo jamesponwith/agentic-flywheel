@@ -112,6 +112,19 @@ and `run` it always executes, because a plan drawn from a stale board is a
 wrong plan. The refusals:
 
 - a PR closed without merging is not a merge; the work is not on main
+- a PR merged into a **non-default branch** is not a merge either — reported as
+  `merged-elsewhere` with the branch it went to, never closed. gh's `MERGED`
+  means "merged somewhere": spot-2ig was closed on PR #4, which went into
+  `fleet/builder-permissions`, leaving 1880 lines on a branch nobody will merge
+  again while the board said done. The default branch is asked of `gh repo
+  view`, never hardcoded to `main` and deliberately not pinnable in the roster —
+  a pin that goes stale reinstates the bug or closes nothing at all
+- a bead **already** closed that way is reported as `closed-elsewhere`, so the
+  ones this rule was written too late for are visible instead of buried. It is
+  a report: reopening it, or landing the branch, is the human's call
+- a MERGED PR with no base branch is a **refusal** — gh did not answer what it
+  was asked, and absorbing that would put every merge in the elsewhere bucket
+  and quietly close nothing
 - a merged PR beside a still-open one is a stack mid-review — kept, not closed
 - `fw-d20`'s merge does not close `fw-d20.1`, nor the reverse; ids nest
 - an id mentioned mid-title does not count — a builder writes its own title, and

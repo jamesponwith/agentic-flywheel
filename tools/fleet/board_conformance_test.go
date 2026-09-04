@@ -31,9 +31,10 @@ func TestConformanceMergedPRLeavesTheReadyQueue(t *testing.T) {
 				t.Fatalf("%s is not ready before the merge; the test proves nothing", id)
 			}
 
-			repo := Repo{Name: "scratch", Path: dir, Lang: "go"}
+			repo := Repo{Name: "scratch", Path: dir, Lang: "go", DefaultBranch: "main"}
 			merged := func(Repo) ([]PR, error) {
-				return []PR{{Number: 62, State: "MERGED", Title: "the work, merged by a human", HeadRefName: "bead/" + id}}, nil
+				return []PR{{Number: 62, State: "MERGED", Title: "the work, merged by a human",
+					HeadRefName: "bead/" + id, BaseRefName: "main"}}, nil
 			}
 			got, err := ReconcileBoard(repo, bdClient{dir: dir, run: execBD}, merged, true)
 			if err != nil {
@@ -79,8 +80,10 @@ func TestConformanceOpenPRDoesNotCloseTheBead(t *testing.T) {
 	dir := scratchRepo(t)
 	id := newBead(t, dir, "work in review")
 	bdIn(t, dir, "update", id, "--claim")
-	got, err := ReconcileBoard(Repo{Name: "scratch", Path: dir}, bdClient{dir: dir, run: execBD},
-		func(Repo) ([]PR, error) { return []PR{{Number: 70, State: "OPEN", HeadRefName: "bead/" + id}}, nil }, true)
+	got, err := ReconcileBoard(Repo{Name: "scratch", Path: dir, DefaultBranch: "main"}, bdClient{dir: dir, run: execBD},
+		func(Repo) ([]PR, error) {
+			return []PR{{Number: 70, State: "OPEN", HeadRefName: "bead/" + id, BaseRefName: "main"}}, nil
+		}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,5 +92,38 @@ func TestConformanceOpenPRDoesNotCloseTheBead(t *testing.T) {
 	}
 	if show := bdIn(t, dir, "show", id, "--json"); !strings.Contains(show, `"in_progress"`) {
 		t.Errorf("bead left in_progress:\n%s", show)
+	}
+}
+
+// fw-ojk's acceptance criterion against a real bd database: the bead whose PR
+// merged into a feature branch is still there afterwards. This is the case that
+// shipped — spot-2ig closed on a PR that went into fleet/builder-permissions —
+// and the property that matters is that the bead survives, not that a function
+// returned a particular string.
+func TestConformanceAPRMergedIntoAFeatureBranchLeavesTheBeadOpen(t *testing.T) {
+	dir := scratchRepo(t)
+	id := newBead(t, dir, "work whose PR merged into the wrong branch")
+
+	got, err := ReconcileBoard(Repo{Name: "scratch", Path: dir, DefaultBranch: "main"}, bdClient{dir: dir, run: execBD},
+		func(Repo) ([]PR, error) {
+			return []PR{{Number: 4, State: "MERGED", Title: "the work, merged into a feature branch",
+				HeadRefName: "bead/" + id, BaseRefName: "fleet/builder-permissions"}}, nil
+		}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Action != "merged-elsewhere" {
+		t.Fatalf("reconcile = %+v, want %s reported as merged-elsewhere", got, id)
+	}
+	if !strings.Contains(got[0].Detail, "fleet/builder-permissions") {
+		t.Errorf("report does not name the branch the work went to: %q", got[0].Detail)
+	}
+	if show := bdIn(t, dir, "show", id, "--json"); strings.Contains(show, `"closed"`) {
+		t.Errorf("%s was closed while main does not have the work:\n%s", id, show)
+	}
+	// And it is still dispatchable: the work is not done, so the coordinator
+	// must still be able to see it.
+	if ready := bdIn(t, dir, "ready", "--json"); !strings.Contains(ready, id) {
+		t.Errorf("%s left bd ready without its work reaching main:\n%s", id, ready)
 	}
 }
