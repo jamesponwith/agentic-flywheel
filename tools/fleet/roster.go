@@ -113,6 +113,13 @@ type Repo struct {
 	Path       string   `json:"path"`
 	Lang       string   `json:"lang"`
 	Paused     bool     `json:"paused,omitempty"`
+	// DefaultBranch is the branch a merge has to reach before a bead is done
+	// (fw-ojk). Resolved from gh by reconcile-board, deliberately NOT settable
+	// from the roster: a pin is a second source of truth that goes stale
+	// silently. Pinned to a feature branch it reinstates fw-ojk exactly; left
+	// pinned to `main` after a rename it makes every merge read as a detour, so
+	// nothing in that repo ever closes. gh is asked, and gh is the authority.
+	DefaultBranch string `json:"-"`
 }
 
 type Agent struct {

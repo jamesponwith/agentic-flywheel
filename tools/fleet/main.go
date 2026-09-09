@@ -157,6 +157,17 @@ func reconcileBoards(r Roster, w io.Writer, execute bool) ([]BoardClose, error) 
 		if repo.Paused {
 			continue
 		}
+		// Resolved here rather than in LoadRoster: every other fleet command
+		// loads the roster too, and none of them should need the network.
+		if repo.DefaultBranch == "" {
+			branch, err := ghDefaultBranch(repo)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "reconcile-board: %s: %v\n", repo.Name, err)
+				failed = append(failed, repo.Name)
+				continue
+			}
+			repo.DefaultBranch = branch
+		}
 		got, err := ReconcileBoard(repo, bdClient{dir: repo.Path, run: execBD}, ghPRs, execute)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconcile-board: %v\n", err)
@@ -194,11 +205,21 @@ func doReconcileBoard(rosterPath string, execute, asJSON bool) error {
 	if err != nil {
 		return err
 	}
+	pending := 0
+	for _, c := range got {
+		if c.Action == "would-close" {
+			pending++
+		}
+	}
 	switch {
 	case len(got) == 0:
-		fmt.Println("board matches main — no merged PR on an open bead")
-	case !execute:
+		fmt.Println("board matches the default branch — no merged PR on an open bead")
+	case !execute && pending > 0:
 		fmt.Println("DRY RUN — pass -execute to close them")
+	case !execute:
+		// merged-elsewhere and closed-elsewhere close nothing under any flag;
+		// offering -execute would promise an action that does not exist.
+		fmt.Println("nothing to close — the lines above are work that did not reach the default branch")
 	}
 	return nil
 }
