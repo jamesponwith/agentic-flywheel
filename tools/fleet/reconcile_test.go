@@ -18,20 +18,21 @@ func reconcileRepo(t *testing.T) Repo {
 	return reconcileRepoOn(t, "main")
 }
 
-// reconcileRepoOn is reconcileRepo with the default branch named branch
-// instead of main, so a test can drive a repo that does not ship from main
-// (fw-64x).
-func reconcileRepoOn(t *testing.T, branch string) Repo {
+// reconcileRepoOn builds a scratch repo whose default branch is defaultBranch
+// — not always "main", because commitsOn used to hardcode that name and
+// silently treat every leftover on a differently-named default branch as
+// empty (fw-boy).
+func reconcileRepoOn(t *testing.T, defaultBranch string) Repo {
 	t.Helper()
 	dir := t.TempDir()
-	for _, a := range [][]string{{"init", "-q", "-b", branch},
+	for _, a := range [][]string{{"init", "-q", "-b", defaultBranch},
 		{"config", "user.email", "r@invalid"}, {"config", "user.name", "r"},
 		{"commit", "-q", "--allow-empty", "-m", "root"}} {
 		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
 	}
-	return Repo{Name: "r", Path: dir, DefaultBranch: branch}
+	return Repo{Name: "r", Path: dir, DefaultBranch: defaultBranch}
 }
 
 func addWorktree(t *testing.T, repo Repo, bead string, commits int) string {
@@ -112,51 +113,60 @@ func TestReconcileIgnoresNonBeadWorktrees(t *testing.T) {
 	}
 }
 
-// commitsOn used to hardcode "main.."+branch, so on a repo whose default
-// branch is not main it would diff against a ref that does not exist, treat
-// every leftover as zero commits, and sweep — force-deleting a branch that
-// may carry real, unmerged work. Same scenarios as the two tests above, just
-// on a repo that ships from "trunk" (fw-64x).
-func TestReconcileOnNonMainDefaultBranch(t *testing.T) {
+// commitsOn used to shell out to "main..branch" no matter what the repo's
+// default branch actually was. On a repo shipping from something else, that
+// git command errored, the error was swallowed, and the branch read as
+// empty — which "sweep the empty ones" then deleted, destroying real commits
+// that were never main's to compare against (fw-boy).
+func TestReconcileUsesRepoDefaultBranch(t *testing.T) {
 	repo := reconcileRepoOn(t, "trunk")
-	_ = addWorktree(t, repo, "keep-1", 2)
+	wt := addWorktree(t, repo, "keep-2", 3)
 
 	got, err := Reconcile(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Action != "kept" || got[0].Commits != 2 {
-		t.Fatalf("got %+v, want one kept leftover with 2 commits", got)
+	if len(got) != 1 || got[0].Action != "kept" || got[0].Commits != 3 {
+		t.Fatalf("got %+v, want one kept leftover with 3 commits", got)
 	}
-	if _, err := inDir(repo.Path, "git", "rev-parse", "--verify", "bead/keep-1").Output(); err != nil {
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Error("worktree not detached — the ground stays occupied")
+	}
+	out, err := inDir(repo.Path, "git", "rev-parse", "--verify", "bead/keep-2").Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
 		t.Error("branch with commits was deleted; that is unmerged work destroyed")
-	}
-
-	empty := reconcileRepoOn(t, "trunk")
-	addWorktree(t, empty, "sweep-1", 0)
-	got, err = Reconcile(empty)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].Action != "swept" {
-		t.Fatalf("got %+v, want one swept leftover", got)
 	}
 }
 
-// Without a default branch there is no ref to diff a leftover against —
-// commitsOn would read every leftover as zero commits and sweep branches that
-// may carry real work. Refuse rather than guess, the same way
-// ReconcileBoard refuses (fw-64x).
-func TestReconcileRefusesWithoutADefaultBranch(t *testing.T) {
+// An unresolved default branch must never be treated as "the branch is
+// empty" — that guess is exactly what destroyed unmerged work before this
+// was fixed. It has to fail closed instead.
+func TestReconcileRefusesWithoutDefaultBranchWhenThereIsSomethingToJudge(t *testing.T) {
 	repo := reconcileRepo(t)
 	repo.DefaultBranch = ""
-	_ = addWorktree(t, repo, "keep-1", 2)
+	addWorktree(t, repo, "unknown-1", 2)
 
 	got, err := Reconcile(repo)
 	if err == nil {
-		t.Fatal("reconciled against an unknown default branch")
+		t.Fatalf("got %+v, nil error — want a refusal, not a guess", got)
 	}
-	if got != nil {
-		t.Errorf("got %+v, want nil on refusal", got)
+	out, verr := inDir(repo.Path, "git", "rev-parse", "--verify", "bead/unknown-1").Output()
+	if verr != nil || strings.TrimSpace(string(out)) == "" {
+		t.Error("branch was deleted despite the unknown default branch")
+	}
+}
+
+// No leftovers means nothing to judge, so an unresolved default branch must
+// not turn a quiet night into a failure.
+func TestReconcileDoesNotNeedDefaultBranchWithNothingToSweep(t *testing.T) {
+	repo := reconcileRepo(t)
+	repo.DefaultBranch = ""
+
+	got, err := Reconcile(repo)
+	if err != nil {
+		t.Fatalf("got error %v, want none — there was nothing to judge", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want no leftovers", got)
 	}
 }
