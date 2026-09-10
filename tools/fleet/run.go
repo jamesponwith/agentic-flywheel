@@ -199,6 +199,21 @@ func Run(r Roster, plan Plan, opts RunOpts) ([]Builder, error) {
 				out[i] = b
 				return
 			}
+			// The repo lock outranks the quota check above having passed:
+			// repoSlot only serialises goroutines inside THIS process, and a
+			// second, independent `fleet run` — the nightly timer and a
+			// quota-hold resume it chained, say — can be dispatching to the
+			// same repo right now (fw-kam). Held only around the actual
+			// build, not around allocation or planning, which touch no
+			// worktree.
+			coordRelease, err := acquireCoordinatorLock(repo.Path, a.Bead)
+			if err != nil {
+				b.Outcome = "skipped"
+				b.Detail = "coordinator lock: " + err.Error()
+				out[i] = b
+				return
+			}
+			defer coordRelease()
 			res := build(repo, a, opts)
 			if res.RateLimited {
 				quota.Lock()

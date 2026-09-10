@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -532,5 +533,34 @@ func TestGitReachableRefusesAFlagShapedDefaultBranch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "flag") {
 		t.Errorf("refusal does not say why: %v", err)
+	}
+}
+
+func TestGHPRsAsksForEveryFieldTheVerdictNeeds(t *testing.T) {
+	// The tests above inject a prLister, so nothing exercises the actual gh
+	// query — dropping baseRefName and mergeCommit from it fails no test at
+	// all. And an absent field does not error: gh simply omits it, PR.BaseRefName
+	// comes back "", every merged PR then looks like it merged nowhere, and the
+	// board stops closing anything while reporting a reason that is not true.
+	//
+	// Reads the source rather than calling gh, because the point is the query
+	// we ship, not whether this machine is authenticated.
+	b, err := os.ReadFile("board.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	i := strings.Index(src, "func ghPRs")
+	if i < 0 {
+		t.Fatal("ghPRs is gone; this test is guarding nothing")
+	}
+	end := strings.Index(src[i:], "\n}")
+	body := src[i : i+end]
+	for _, field := range []string{"number", "state", "headRefName", "baseRefName", "mergeCommit"} {
+		if !strings.Contains(body, field) {
+			t.Errorf("ghPRs does not ask gh for %q, which the verdict reads.\n"+
+				"gh omits unknown fields silently, so this reads as an empty value "+
+				"rather than an error.", field)
+		}
 	}
 }

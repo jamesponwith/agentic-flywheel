@@ -52,19 +52,13 @@ func ghPRs(repo Repo) ([]PR, error) {
 	// beads that matter are the ones whose PR merged recently, and 200 is
 	// months of this fleet's throughput. The upgrade is --search with a
 	// merged:> date, once the list is long enough to page.
-	out, err := exec.Command("gh", "pr", "list", "--repo", "jamesponwith/"+repo.Name,
-		"--state", "all", "--limit", "200", "--json", "number,state,title,headRefName,baseRefName,mergeCommit").Output()
-	if err != nil {
-		// Keep stderr: "auth expired", "rate limited" and "no such repo" are
-		// different problems, and the caller's refusal to plan should say which.
-		if ee, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("gh pr list: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, fmt.Errorf("gh pr list: %w", err)
-	}
+	//
+	// Through ghJSON so the owner comes from one place (fw-64x) rather than a
+	// hardcoded "jamesponwith/" — this repo is not the only one the fleet runs.
 	var prs []PR
-	if err := json.Unmarshal(out, &prs); err != nil {
-		return nil, fmt.Errorf("gh pr list: %w", err)
+	if err := ghJSON(repo, []string{"pr", "list", "--state", "all", "--limit", "200"},
+		"number,state,title,headRefName,baseRefName,mergeCommit", &prs); err != nil {
+		return nil, err
 	}
 	return prs, nil
 }
