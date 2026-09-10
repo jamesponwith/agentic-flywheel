@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+// alwaysReachable stands in for gitReachable in every test that is not about
+// reachability itself — the same role a canned prLister plays for gh.
+func alwaysReachable(Repo, string, string) (bool, error) { return true, nil }
+
 func TestReconcileBoard(t *testing.T) {
 	tests := []struct {
 		name string
@@ -172,7 +176,7 @@ func TestReconcileBoard(t *testing.T) {
 			}
 			repo := Repo{Name: "scratch", Path: ".", DefaultBranch: branch}
 			f := newFake(tt.beads...)
-			got, err := ReconcileBoard(repo, bdClient{dir: ".", run: f.run}, func(Repo) ([]PR, error) { return tt.prs, nil }, true)
+			got, err := ReconcileBoard(repo, bdClient{dir: ".", run: f.run}, func(Repo) ([]PR, error) { return tt.prs, nil }, alwaysReachable, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -238,7 +242,7 @@ func TestReconcileBoard(t *testing.T) {
 func TestReconcileBoardRefusesToGuessWhenGHFails(t *testing.T) {
 	f := newFake(Bead{ID: "fw-d20", Status: "open"})
 	_, err := ReconcileBoard(Repo{Name: "scratch", DefaultBranch: "main"}, bdClient{dir: ".", run: f.run},
-		func(Repo) ([]PR, error) { return nil, errors.New("gh: connection refused") }, true)
+		func(Repo) ([]PR, error) { return nil, errors.New("gh: connection refused") }, alwaysReachable, true)
 	if err == nil {
 		t.Fatal("a failed PR listing was reported as success")
 	}
@@ -258,7 +262,7 @@ func TestReconcileBoardRefusesWithoutADefaultBranch(t *testing.T) {
 	_, err := ReconcileBoard(Repo{Name: "scratch"}, bdClient{dir: ".", run: f.run},
 		func(Repo) ([]PR, error) {
 			return []PR{{Number: 62, State: "MERGED", HeadRefName: "bead/fw-d20", BaseRefName: "main"}}, nil
-		}, true)
+		}, alwaysReachable, true)
 	if err == nil {
 		t.Fatal("reconciled against an unknown default branch")
 	}
@@ -278,7 +282,7 @@ func TestReconcileBoardRefusesAMergedPRWithNoBase(t *testing.T) {
 	_, err := ReconcileBoard(Repo{Name: "scratch", DefaultBranch: "main"}, bdClient{dir: ".", run: f.run},
 		func(Repo) ([]PR, error) {
 			return []PR{{Number: 62, State: "MERGED", HeadRefName: "bead/fw-d20"}}, nil
-		}, true)
+		}, alwaysReachable, true)
 	if err == nil {
 		t.Fatal("a MERGED PR with no base was reconciled as if it had one")
 	}
@@ -299,7 +303,7 @@ func TestReconcileBoardFlattensAPRTitle(t *testing.T) {
 	got, err := ReconcileBoard(Repo{Name: "scratch", DefaultBranch: "main"}, bdClient{dir: ".", run: f.run},
 		func(Repo) ([]PR, error) {
 			return []PR{{Number: 62, State: "MERGED", Title: forged, HeadRefName: "bead/fw-d20", BaseRefName: "main"}}, nil
-		}, true)
+		}, alwaysReachable, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +328,7 @@ func TestReconcileBoardReportsAFailedClose(t *testing.T) {
 			{Number: 1, State: "MERGED", HeadRefName: "bead/fw-aaa", BaseRefName: "main"},
 			{Number: 2, State: "MERGED", HeadRefName: "bead/fw-bbb", BaseRefName: "main"},
 		}, nil
-	}, true)
+	}, alwaysReachable, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +344,7 @@ func TestReconcileBoardDryRunClosesNothing(t *testing.T) {
 	got, err := ReconcileBoard(Repo{Name: "scratch", DefaultBranch: "main"}, bdClient{dir: ".", run: f.run},
 		func(Repo) ([]PR, error) {
 			return []PR{{Number: 62, State: "MERGED", HeadRefName: "bead/fw-d20", BaseRefName: "main"}}, nil
-		}, false)
+		}, alwaysReachable, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,6 +358,92 @@ func TestReconcileBoardDryRunClosesNothing(t *testing.T) {
 		if strings.HasPrefix(c, "close ") {
 			t.Errorf("dry run called bd close: %s", c)
 		}
+	}
+}
+
+// baseRefName says a PR merged onto main; that no longer means the merge is
+// still there. A force-push can rewrite main well after a correct merge —
+// exactly what happened to this workspace's main, stripping fixture
+// trailers — leaving baseRefName untouched while the commit it names stops
+// being an ancestor. This is the case fw-ojk's base check alone would still
+// wrongly close (fw-n1r).
+func TestReconcileBoardMergedButUnreachableIsNotClosed(t *testing.T) {
+	f := newFake(Bead{ID: "fw-d20", Status: "open"})
+	unreachable := func(repo Repo, commit, defaultBranch string) (bool, error) {
+		if commit != "deadbeef" || defaultBranch != "main" {
+			t.Errorf("reachable(%q, %q) — want the PR's merge commit and the repo's default branch", commit, defaultBranch)
+		}
+		return false, nil
+	}
+	got, err := ReconcileBoard(Repo{Name: "scratch", DefaultBranch: "main"}, bdClient{dir: ".", run: f.run},
+		func(Repo) ([]PR, error) {
+			return []PR{{Number: 62, State: "MERGED", HeadRefName: "bead/fw-d20", BaseRefName: "main",
+				MergeCommit: ghCommit{OID: "deadbeef"}}}, nil
+		}, unreachable, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Action != "merged-not-reachable" || got[0].PR != 62 {
+		t.Fatalf("got %+v, want fw-d20 merged-not-reachable on #62", got)
+	}
+	if !strings.Contains(got[0].Detail, "reachable") {
+		t.Errorf("detail does not say why: %q", got[0].Detail)
+	}
+	if f.beads["fw-d20"].Status != "open" {
+		t.Errorf("bead was %s after a merge that is no longer reachable", f.beads["fw-d20"].Status)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "close ") {
+			t.Errorf("an unreachable merge called bd close: %s", c)
+		}
+	}
+}
+
+// A merged parent with an open child is normally "kept" — the stack is still
+// in review. But a parent whose own merge was rewritten out from under it is
+// not "still in review", it is gone; reachability is checked first.
+func TestReconcileBoardUnreachableParentIsNotKept(t *testing.T) {
+	f := newFake(Bead{ID: "fw-bbb", Status: "in_progress"})
+	got, err := ReconcileBoard(Repo{Name: "scratch", DefaultBranch: "main"}, bdClient{dir: ".", run: f.run},
+		func(Repo) ([]PR, error) {
+			return []PR{
+				{Number: 71, State: "MERGED", Title: "fw-bbb: part one", HeadRefName: "bead/fw-bbb", BaseRefName: "main", MergeCommit: ghCommit{OID: "deadbeef"}},
+				{Number: 72, State: "OPEN", Title: "fw-bbb: part two", HeadRefName: "bead/fw-bbb-2", BaseRefName: "main"},
+			}, nil
+		}, func(Repo, string, string) (bool, error) { return false, nil }, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Action != "merged-not-reachable" {
+		t.Fatalf("got %+v, want fw-bbb merged-not-reachable, not kept", got)
+	}
+}
+
+// A reachability check that cannot answer — git down, an unreadable clone —
+// is reported as failed for that one bead, the same as a failed bd close.
+// One bad bead must not hide every other merge on the board.
+func TestReconcileBoardReportsAFailedReachabilityCheck(t *testing.T) {
+	f := newFake(Bead{ID: "fw-aaa", Status: "open"}, Bead{ID: "fw-bbb", Status: "open"})
+	got, err := ReconcileBoard(Repo{Name: "scratch", DefaultBranch: "main"}, bdClient{dir: ".", run: f.run},
+		func(Repo) ([]PR, error) {
+			return []PR{
+				{Number: 1, State: "MERGED", HeadRefName: "bead/fw-aaa", BaseRefName: "main", MergeCommit: ghCommit{OID: "bad"}},
+				{Number: 2, State: "MERGED", HeadRefName: "bead/fw-bbb", BaseRefName: "main", MergeCommit: ghCommit{OID: "good"}},
+			}, nil
+		}, func(repo Repo, commit, defaultBranch string) (bool, error) {
+			if commit == "bad" {
+				return false, errors.New("git: fetch failed")
+			}
+			return true, nil
+		}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Action != "failed" || got[1].Action != "closed" {
+		t.Fatalf("got %+v, want fw-aaa failed and fw-bbb closed", got)
+	}
+	if !strings.Contains(got[0].Detail, "fetch failed") {
+		t.Errorf("failure hides the cause: %q", got[0].Detail)
 	}
 }
 

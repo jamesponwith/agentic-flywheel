@@ -24,6 +24,18 @@ type PR struct {
 	// the reconciler cannot tell a landing from a detour (fw-ojk).
 	HeadRefName string `json:"headRefName"`
 	BaseRefName string `json:"baseRefName"`
+	// MergeCommit is the SHA a MERGED PR landed as. baseRefName only answers
+	// where it was aimed; a rewrite (force-push) after the merge leaves the
+	// base unchanged while the commit stops being reachable from it — the gap
+	// this closes (fw-n1r). Empty for a PR that never merged.
+	MergeCommit ghCommit `json:"mergeCommit"`
+}
+
+// ghCommit mirrors gh's nested shape for commit-typed JSON fields —
+// {"oid": "..."} — instead of a bare string; headRefName and baseRefName are
+// already flat because gh exposes them as such, but mergeCommit is not.
+type ghCommit struct {
+	OID string `json:"oid"`
 }
 
 // prLister lists a repo's pull requests. Injected so tests never touch gh.
@@ -38,7 +50,7 @@ func ghPRs(repo Repo) ([]PR, error) {
 	// months of this fleet's throughput. The upgrade is --search with a
 	// merged:> date, once the list is long enough to page.
 	out, err := exec.Command("gh", "pr", "list", "--repo", "jamesponwith/"+repo.Name,
-		"--state", "all", "--limit", "200", "--json", "number,state,title,headRefName,baseRefName").Output()
+		"--state", "all", "--limit", "200", "--json", "number,state,title,headRefName,baseRefName,mergeCommit").Output()
 	if err != nil {
 		// Keep stderr: "auth expired", "rate limited" and "no such repo" are
 		// different problems, and the caller's refusal to plan should say which.
@@ -82,12 +94,42 @@ func ghDefaultBranch(repo Repo) (string, error) {
 	return v.DefaultBranchRef.Name, nil
 }
 
+// reachabilityChecker reports whether commit is still an ancestor of
+// defaultBranch. Injected the same way prLister is: a unit test fakes the
+// answer for every scenario except the one this type exists for, and only the
+// conformance test drives real git through a genuine merge-then-rewrite
+// history — mocking the answer is exactly what would have passed before this
+// existed (fw-n1r).
+type reachabilityChecker func(repo Repo, commit, defaultBranch string) (bool, error)
+
+// gitReachable is the real reachabilityChecker. It fetches the default branch
+// fresh, then asks git whether commit is still an ancestor of it.
+//
+// Fetch first, or the answer is about whatever origin/<default> last happened
+// to be — the exact stale remote-tracking ref this exists to stop trusting.
+func gitReachable(repo Repo, commit, defaultBranch string) (bool, error) {
+	if out, err := inDir(repo.Path, "git", "fetch", "origin", defaultBranch).CombinedOutput(); err != nil {
+		return false, fmt.Errorf("git fetch origin %s: %w: %s", defaultBranch, err, strings.TrimSpace(string(out)))
+	}
+	err := inDir(repo.Path, "git", "merge-base", "--is-ancestor", commit, "origin/"+defaultBranch).Run()
+	if err == nil {
+		return true, nil
+	}
+	// --is-ancestor signals "no" with exit 1 and every other problem — commit
+	// does not even resolve to an object — with anything else. Absorbing the
+	// second into the first would report a broken check as a force-push found.
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git merge-base --is-ancestor %s origin/%s: %w", commit, defaultBranch, err)
+}
+
 // BoardClose is one bead the reconciler acted on, or deliberately did not.
 type BoardClose struct {
 	Repo   string `json:"repo"`
 	Bead   string `json:"bead"`
 	PR     int    `json:"pr"`
-	Action string `json:"action"` // closed | would-close | kept | merged-elsewhere | closed-elsewhere | failed
+	Action string `json:"action"` // closed | would-close | kept | merged-elsewhere | closed-elsewhere | merged-not-reachable | failed
 	Detail string `json:"detail"`
 }
 
@@ -115,13 +157,24 @@ func oneLine(s string) string {
 // A listing failure is an error, not an empty list: "gh is down" and "nothing
 // merged" must not look alike, because the second one dispatches builders.
 //
+// baseRefName answers "where was it aimed", not "is it there". A PR that
+// merged onto repo.DefaultBranch is still checked for reachability: the merge
+// commit must be an ancestor of the default branch right now, fetched fresh.
+// A force-push can rewrite history well after a correct merge — this
+// workspace's main was, to strip fixture trailers — leaving baseRefName
+// intact while the commit it named is gone. That bead is reported as
+// "merged-not-reachable" and left open; it wants a human, not a retry
+// (fw-n1r). A reachability check that itself fails to answer is reported as
+// "failed" for that one bead, the same as a failed bd close — one bad bead
+// must not hide the rest of the board.
+//
 // ponytail: a bead a human reopened after its PR merged is closed again on the
 // next cycle, because the PR stays MERGED forever. Reverted or broken work
 // gets a new bead — one PR is one idea (ADR 0009), and a reopened one would
 // be a second idea under the first's name. A fork PR titled after a bead can
 // force "kept" and a rebuild; this repo takes no outside PRs, and the cost is
 // the pre-existing behaviour, not a new one.
-func ReconcileBoard(repo Repo, bd bdClient, list prLister, execute bool) ([]BoardClose, error) {
+func ReconcileBoard(repo Repo, bd bdClient, list prLister, reachable reachabilityChecker, execute bool) ([]BoardClose, error) {
 	if repo.DefaultBranch == "" {
 		return nil, fmt.Errorf("%s: default branch unknown — cannot tell a merge that ships from one into a feature branch, and closing on the second loses the work (fw-ojk)", repo.Name)
 	}
@@ -162,6 +215,26 @@ func ReconcileBoard(repo Repo, bd bdClient, list prLister, execute bool) ([]Boar
 				Repo: repo.Name, Bead: b.ID, PR: elsewhere[0].Number, Action: "merged-elsewhere",
 				Detail: fmt.Sprintf("PR #%d merged into %s, not %s — the work is not on the default branch: %s",
 					elsewhere[0].Number, elsewhere[0].BaseRefName, repo.DefaultBranch, oneLine(elsewhere[0].Title)),
+			})
+			continue
+		}
+		// baseRefName passed; reachability is the second, independent question.
+		// Checked before "kept" too — a stack whose parent merge was rewritten
+		// out from under it is not "still in review", it is gone.
+		ok, rerr := reachable(repo, merged[0].MergeCommit.OID, repo.DefaultBranch)
+		if rerr != nil {
+			out = append(out, BoardClose{
+				Repo: repo.Name, Bead: b.ID, PR: merged[0].Number, Action: "failed",
+				Detail: fmt.Sprintf("could not confirm PR #%d's merge is still reachable: %v", merged[0].Number, rerr),
+			})
+			continue
+		}
+		if !ok {
+			out = append(out, BoardClose{
+				Repo: repo.Name, Bead: b.ID, PR: merged[0].Number, Action: "merged-not-reachable",
+				Detail: fmt.Sprintf("PR #%d merged into %s, but the merge commit is no longer reachable from %s — "+
+					"history was rewritten after the merge (force-push); a human should check whether the work survived",
+					merged[0].Number, repo.DefaultBranch, repo.DefaultBranch),
 			})
 			continue
 		}
