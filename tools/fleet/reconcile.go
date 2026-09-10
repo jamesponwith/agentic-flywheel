@@ -31,13 +31,6 @@ type Leftover struct {
 
 // Reconcile sweeps abandoned builder worktrees in one repo.
 func Reconcile(repo Repo) ([]Leftover, error) {
-	if repo.DefaultBranch == "" {
-		// Refuse rather than guess: commitsOn without a default branch would
-		// diff against an empty ref, read every leftover as zero commits, and
-		// sweep — force-deleting branches that may carry real, unmerged work
-		// (fw-64x).
-		return nil, fmt.Errorf("%s: default branch unknown — cannot tell a leftover with real commits from an empty one", repo.Name)
-	}
 	out, err := inDir(repo.Path, "git", "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", repo.Name, err)
@@ -60,6 +53,16 @@ func Reconcile(repo Repo) ([]Leftover, error) {
 			}
 			wt, branch = "", ""
 		}
+	}
+
+	// Only once there is something to judge. commitsOn without a default branch
+	// would diff against an empty ref, read every leftover as zero commits, and
+	// sweep — force-deleting branches that may carry real unmerged work
+	// (fw-64x). But a repo with nothing to sweep must not fail merely because
+	// gh has not answered: that turns one repo's outage into every repo's,
+	// which is the opposite of what resolving per-repo was for (fw-boy).
+	if len(found) > 0 && repo.DefaultBranch == "" {
+		return nil, fmt.Errorf("%s: default branch unknown — cannot tell a leftover with real commits from an empty one", repo.Name)
 	}
 
 	for i := range found {

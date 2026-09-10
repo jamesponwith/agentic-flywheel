@@ -170,7 +170,7 @@ func reconcileBoards(r Roster, w io.Writer, execute bool) ([]BoardClose, error) 
 			continue
 		}
 		repo := r.Repos[i]
-		got, err := ReconcileBoard(repo, bdClient{dir: repo.Path, run: execBD}, ghPRs, execute)
+		got, err := ReconcileBoard(repo, bdClient{dir: repo.Path, run: execBD}, ghPRs, gitReachable, execute)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconcile-board: %v\n", err)
 			failed = append(failed, repo.Name)
@@ -219,9 +219,10 @@ func doReconcileBoard(rosterPath string, execute, asJSON bool) error {
 	case !execute && pending > 0:
 		fmt.Println("DRY RUN — pass -execute to close them")
 	case !execute:
-		// merged-elsewhere and closed-elsewhere close nothing under any flag;
-		// offering -execute would promise an action that does not exist.
-		fmt.Println("nothing to close — the lines above are work that did not reach the default branch")
+		// merged-elsewhere, closed-elsewhere, kept, merged-not-reachable and
+		// failed close nothing under any flag; offering -execute would promise
+		// an action that does not exist.
+		fmt.Println("nothing to close — the lines above name what this cycle would not close, and why")
 	}
 	return nil
 }
