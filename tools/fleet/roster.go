@@ -21,12 +21,24 @@ type Roster struct {
 	// paths is what makes the roster portable — and stops a public repo
 	// publishing the maintainer's home directory layout.
 	WorkspaceRoot string `json:"workspace_root,omitempty"`
-	Caps          Caps   `json:"caps"`
+	// GitHubOwner is the account or org every repo in the roster lives under.
+	// Defaults to DefaultGitHubOwner so an existing roster needs no edit.
+	// Every gh call the fleet makes reads this one field (via Repo.Owner,
+	// resolved below) rather than each hardcoding the account separately —
+	// that used to be a three-site edit to change (fw-64x).
+	GitHubOwner string `json:"github_owner,omitempty"`
+	Caps        Caps   `json:"caps"`
 	// Runner is how a builder is invoked (ADR 0010). Omit for the default.
 	Runner Runner  `json:"runner,omitempty"`
 	Repos  []Repo  `json:"repos"`
 	Agents []Agent `json:"agents"`
 }
+
+// DefaultGitHubOwner is the fleet's own account, used when a roster does not
+// set github_owner. The fleet is currently single-owner; a roster that moves
+// or grows a second owner sets the field rather than teaching a new hardcode
+// somewhere else.
+const DefaultGitHubOwner = "jamesponwith"
 
 // expandPath resolves ~, $HOME, and paths relative to the workspace root.
 // An absolute path is honoured as-is, so an unusual layout is still expressible.
@@ -120,6 +132,12 @@ type Repo struct {
 	// pinned to `main` after a rename it makes every merge read as a detour, so
 	// nothing in that repo ever closes. gh is asked, and gh is the authority.
 	DefaultBranch string `json:"-"`
+	// Owner is the GitHub account/org this repo lives under, resolved once in
+	// LoadRoster from the roster's GitHubOwner (fw-64x). Not itself
+	// JSON-settable per repo — one roster-level source, same reasoning as
+	// DefaultBranch above but without the network round trip, since the fleet
+	// is single-owner and has no per-repo reason to disagree.
+	Owner string `json:"-"`
 }
 
 type Agent struct {
@@ -138,7 +156,11 @@ func LoadRoster(path string) (Roster, error) {
 	if err := json.Unmarshal(b, &r); err != nil {
 		return r, fmt.Errorf("%s: %w", path, err)
 	}
+	if r.GitHubOwner == "" {
+		r.GitHubOwner = DefaultGitHubOwner
+	}
 	for i := range r.Repos {
+		r.Repos[i].Owner = r.GitHubOwner
 		r.Repos[i].Path = expandPath(r.Repos[i].Path, r.WorkspaceRoot)
 		// Resolve symlinks once, here. blackbird keys reservations by
 		// project_key: two agents that derive different keys for the same repo

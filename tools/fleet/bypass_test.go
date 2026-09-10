@@ -7,9 +7,16 @@ import (
 
 func gitRepo(t *testing.T) string {
 	t.Helper()
+	return gitRepoOn(t, "main")
+}
+
+// gitRepoOn is gitRepo with the default branch named branch instead of main,
+// so a test can drive a repo that does not ship from main (fw-64x).
+func gitRepoOn(t *testing.T, branch string) string {
+	t.Helper()
 	dir := t.TempDir()
 	for _, args := range [][]string{
-		{"init", "-q", "-b", "main"},
+		{"init", "-q", "-b", branch},
 		{"config", "user.email", "t@invalid"}, {"config", "user.name", "t"},
 	} {
 		if out, err := gitCmd(dir, args...).CombinedOutput(); err != nil {
@@ -46,20 +53,20 @@ func TestDetectBypasses(t *testing.T) {
 	// Work that skipped it: committed straight onto main.
 	commit(t, dir, "hotfix straight to main")
 
-	got, err := DetectBypasses("r", dir, "")
+	got, err := DetectBypasses(Repo{Name: "r", Path: dir, DefaultBranch: "main"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var direct []Bypass
 	for _, b := range got {
-		if b.Kind == "direct-to-main" {
+		if b.Kind == "direct-to-default" {
 			direct = append(direct, b)
 		}
 	}
 	// "initial" and the hotfix both bypassed; the feature commit did not.
 	if len(direct) != 2 {
-		t.Fatalf("found %d direct-to-main, want 2: %+v", len(direct), got)
+		t.Fatalf("found %d direct-to-default, want 2: %+v", len(direct), got)
 	}
 	for _, b := range direct {
 		if b.Detail == "" || b.Commit == "" {
@@ -71,15 +78,62 @@ func TestDetectBypasses(t *testing.T) {
 	}
 }
 
+// A repo whose default branch is not main used to be invisible to this
+// detector: mergedPRCommits and the rev-list walk both hardcoded "main", so
+// on a "trunk"-shipping repo neither ref would exist and every call would
+// either error or silently see zero history. Same scenario as
+// TestDetectBypasses, just on a differently named branch (fw-64x).
+func TestDetectBypassesOnNonMainDefaultBranch(t *testing.T) {
+	dir := gitRepoOn(t, "trunk")
+	commit(t, dir, "initial")
+
+	run(t, dir, "checkout", "-q", "-b", "feature")
+	commit(t, dir, "through the gate")
+	run(t, dir, "checkout", "-q", "trunk")
+	run(t, dir, "merge", "--no-ff", "-q", "-m", "Merge pull request #1", "feature")
+
+	commit(t, dir, "hotfix straight to trunk")
+
+	got, err := DetectBypasses(Repo{Name: "r", Path: dir, DefaultBranch: "trunk"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var direct []Bypass
+	for _, b := range got {
+		if b.Kind == "direct-to-default" {
+			direct = append(direct, b)
+		}
+	}
+	if len(direct) != 2 {
+		t.Fatalf("found %d direct-to-default on a trunk-shipping repo, want 2: %+v", len(direct), got)
+	}
+	for _, b := range direct {
+		if b.Detail == "through the gate — never passed the PR gate" {
+			t.Error("counted a commit that arrived via a merged PR")
+		}
+	}
+}
+
+// Without a default branch there is no branch to diff against — refuse
+// rather than guess, the same way ReconcileBoard refuses (fw-64x).
+func TestDetectBypassesRefusesWithoutADefaultBranch(t *testing.T) {
+	dir := gitRepo(t)
+	commit(t, dir, "initial")
+	if _, err := DetectBypasses(Repo{Name: "r", Path: dir}, ""); err == nil {
+		t.Fatal("detected bypasses against an unknown default branch")
+	}
+}
+
 func TestOverBudget(t *testing.T) {
 	// Two is tolerated; the third trips the rule.
-	two := []Bypass{{Repo: "r", Kind: "direct-to-main"}, {Repo: "r", Kind: "direct-to-main"}}
+	two := []Bypass{{Repo: "r", Kind: "direct-to-default"}, {Repo: "r", Kind: "direct-to-default"}}
 	if over := OverBudget(two); len(over) != 0 {
 		t.Errorf("two bypasses tripped the budget: %v", over)
 	}
-	three := append(two, Bypass{Repo: "r", Kind: "direct-to-main"})
+	three := append(two, Bypass{Repo: "r", Kind: "direct-to-default"})
 	over := OverBudget(three)
-	if over["r/direct-to-main"] != 3 {
+	if over["r/direct-to-default"] != 3 {
 		t.Errorf("three bypasses did not trip the budget: %v", over)
 	}
 }
@@ -93,7 +147,7 @@ func TestSquashMergedPRsAreNotBypasses(t *testing.T) {
 	commit(t, dir, "Add the thing (#4)")   // squash-merged PR
 	commit(t, dir, "hotfix straight main") // genuine bypass
 
-	got, err := DetectBypasses("r", dir, "")
+	got, err := DetectBypasses(Repo{Name: "r", Path: dir, DefaultBranch: "main"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +163,7 @@ func TestSquashMergedPRsAreNotBypasses(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("the genuine direct-to-main commit was not reported")
+		t.Error("the genuine direct-to-default commit was not reported")
 	}
 }
 
@@ -150,7 +204,7 @@ func TestBypassCalibration(t *testing.T) {
 	commit(t, dir, "chore: bump thing")                                              // bookkeeping
 	commit(t, dir, "fix the parser without a PR")                                    // the real thing
 
-	got, err := DetectBypasses("r", dir, "")
+	got, err := DetectBypasses(Repo{Name: "r", Path: dir, DefaultBranch: "main"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
