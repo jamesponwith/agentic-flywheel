@@ -136,6 +136,26 @@ func doReclaim(l leaser, asJSON bool) error {
 	return nil
 }
 
+// resolveDefaultBranches fills in DefaultBranch for every unpaused repo that
+// doesn't already have one, and persists it onto r.Repos. Pointer receiver so
+// the mutation is visible at the call site, not just in this function's doc
+// comment: one gh call per repo, shared by whatever runs next — doRun needs
+// the answer before Reconcile's leftover sweep, which happens before
+// reconcileBoards would otherwise resolve the same thing itself (fw-boy).
+func resolveDefaultBranches(r *Roster) {
+	for i := range r.Repos {
+		if r.Repos[i].Paused || r.Repos[i].DefaultBranch != "" {
+			continue
+		}
+		branch, err := ghDefaultBranch(r.Repos[i])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "default branch: %s: %v\n", r.Repos[i].Name, err)
+			continue
+		}
+		r.Repos[i].DefaultBranch = branch
+	}
+}
+
 // reconcileBoards carries every human merge back to the board before the
 // coordinator reads it (ADR 0016).
 //
@@ -500,6 +520,11 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 	if err != nil {
 		return err
 	}
+	// Resolved before the sweep below needs it, not inside it: commitsOn has
+	// to know the real default branch to tell a leftover with real work from
+	// an empty one (fw-boy). reconcileBoards, further down, skips repos this
+	// already resolved instead of asking gh again.
+	resolveDefaultBranches(&r)
 	// Reconcile before allocating. A killed run leaves a worktree and branch
 	// behind, and `git worktree add -b bead/<id>` is fatal when the branch
 	// exists — so without this, one bad night removes those beads from the

@@ -55,9 +55,15 @@ func Reconcile(repo Repo) ([]Leftover, error) {
 		}
 	}
 
+	// Only required once there is something to judge — a repo with nothing to
+	// sweep should not fail just because gh hasn't answered yet.
+	if len(found) > 0 && repo.DefaultBranch == "" {
+		return nil, fmt.Errorf("%s: default branch unknown — cannot tell a leftover with real work from an empty one without it", repo.Name)
+	}
+
 	for i := range found {
 		l := &found[i]
-		l.Commits = commitsOn(repo.Path, l.Branch)
+		l.Commits = commitsOn(repo.Path, repo.DefaultBranch, l.Branch)
 		if l.Commits > 0 {
 			// Somebody's work. Detach the worktree so the ground is free, but
 			// never touch the branch — destroying unmerged commits to tidy up
@@ -85,9 +91,12 @@ func Reconcile(repo Repo) ([]Leftover, error) {
 
 // commitsOn counts commits a branch carries over the repo's default branch.
 // Unlike commitsSince this has no recorded base, because a stranded builder
-// left no record of where it started.
-func commitsOn(dir, branch string) int {
-	out, err := inDir(dir, "git", "rev-list", "--count", "main.."+branch).Output()
+// left no record of where it started. defaultBranch is the caller's job to
+// resolve — a repo whose default branch is not "main" made this return 0 for
+// every branch when it was hardcoded, which reconcile then swept as empty
+// (fw-boy).
+func commitsOn(dir, defaultBranch, branch string) int {
+	out, err := inDir(dir, "git", "rev-list", "--count", defaultBranch+".."+branch).Output()
 	if err != nil {
 		return 0
 	}
