@@ -8,7 +8,7 @@ import (
 
 // alwaysReachable stands in for gitReachable in every test that is not about
 // reachability itself — the same role a canned prLister plays for gh.
-func alwaysReachable(Repo, string, string) (bool, error) { return true, nil }
+func alwaysReachable(Repo, string) (bool, error) { return true, nil }
 
 func TestReconcileBoard(t *testing.T) {
 	tests := []struct {
@@ -369,9 +369,9 @@ func TestReconcileBoardDryRunClosesNothing(t *testing.T) {
 // wrongly close (fw-n1r).
 func TestReconcileBoardMergedButUnreachableIsNotClosed(t *testing.T) {
 	f := newFake(Bead{ID: "fw-d20", Status: "open"})
-	unreachable := func(repo Repo, commit, defaultBranch string) (bool, error) {
-		if commit != "deadbeef" || defaultBranch != "main" {
-			t.Errorf("reachable(%q, %q) — want the PR's merge commit and the repo's default branch", commit, defaultBranch)
+	unreachable := func(repo Repo, commit string) (bool, error) {
+		if commit != "deadbeef" || repo.DefaultBranch != "main" {
+			t.Errorf("reachable(%+v, %q) — want the repo passed through and the PR's merge commit", repo, commit)
 		}
 		return false, nil
 	}
@@ -399,6 +399,34 @@ func TestReconcileBoardMergedButUnreachableIsNotClosed(t *testing.T) {
 	}
 }
 
+// A bead can have two PRs that both merged onto the default branch — a
+// follow-up PR for the same bead is not unheard of. If the first one gh lists
+// was rewritten away but a later one for the same bead is still there, the
+// bead must close on the one that is, not stay open because the first entry
+// in an unordered list happened to be gone.
+func TestReconcileBoardClosesOnASecondMergeWhenTheFirstIsUnreachable(t *testing.T) {
+	f := newFake(Bead{ID: "fw-d20", Status: "open"})
+	reachable := func(repo Repo, commit string) (bool, error) {
+		return commit == "good", nil
+	}
+	got, err := ReconcileBoard(Repo{Name: "scratch", DefaultBranch: "main"}, bdClient{dir: ".", run: f.run},
+		func(Repo) ([]PR, error) {
+			return []PR{
+				{Number: 62, State: "MERGED", Title: "fw-d20: first attempt", HeadRefName: "bead/fw-d20", BaseRefName: "main", MergeCommit: ghCommit{OID: "rewritten"}},
+				{Number: 70, State: "MERGED", Title: "fw-d20: the one that stuck", HeadRefName: "bead/fw-d20", BaseRefName: "main", MergeCommit: ghCommit{OID: "good"}},
+			}, nil
+		}, reachable, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Action != "closed" || got[0].PR != 70 {
+		t.Fatalf("got %+v, want fw-d20 closed on #70, the reachable merge", got)
+	}
+	if f.beads["fw-d20"].Status != "closed" {
+		t.Errorf("bead was %s, want closed", f.beads["fw-d20"].Status)
+	}
+}
+
 // A merged parent with an open child is normally "kept" — the stack is still
 // in review. But a parent whose own merge was rewritten out from under it is
 // not "still in review", it is gone; reachability is checked first.
@@ -410,7 +438,7 @@ func TestReconcileBoardUnreachableParentIsNotKept(t *testing.T) {
 				{Number: 71, State: "MERGED", Title: "fw-bbb: part one", HeadRefName: "bead/fw-bbb", BaseRefName: "main", MergeCommit: ghCommit{OID: "deadbeef"}},
 				{Number: 72, State: "OPEN", Title: "fw-bbb: part two", HeadRefName: "bead/fw-bbb-2", BaseRefName: "main"},
 			}, nil
-		}, func(Repo, string, string) (bool, error) { return false, nil }, true)
+		}, func(Repo, string) (bool, error) { return false, nil }, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +458,7 @@ func TestReconcileBoardReportsAFailedReachabilityCheck(t *testing.T) {
 				{Number: 1, State: "MERGED", HeadRefName: "bead/fw-aaa", BaseRefName: "main", MergeCommit: ghCommit{OID: "bad"}},
 				{Number: 2, State: "MERGED", HeadRefName: "bead/fw-bbb", BaseRefName: "main", MergeCommit: ghCommit{OID: "good"}},
 			}, nil
-		}, func(repo Repo, commit, defaultBranch string) (bool, error) {
+		}, func(repo Repo, commit string) (bool, error) {
 			if commit == "bad" {
 				return false, errors.New("git: fetch failed")
 			}
@@ -471,5 +499,38 @@ func TestNames(t *testing.T) {
 		if got := names(tt.pr, tt.id); got != tt.want {
 			t.Errorf("%s: names(%+v, %q) = %v, want %v", tt.name, tt.pr, tt.id, got, tt.want)
 		}
+	}
+}
+
+// commit and defaultBranch reach git as bare positional arguments to fetch
+// and merge-base --is-ancestor. Both refusals are checked before either git
+// command runs, so neither test needs a real repo — Path is never touched.
+func TestGitReachableRefusesANonSHACommit(t *testing.T) {
+	for _, commit := range []string{"", "HEAD", "main", "-x", "abc123", strings.Repeat("g", 40)} {
+		t.Run(commit, func(t *testing.T) {
+			_, err := gitReachable(Repo{Path: ".", DefaultBranch: "main"}, commit)
+			if err == nil {
+				t.Fatalf("gitReachable accepted %q as a revision", commit)
+			}
+			if !strings.Contains(err.Error(), "SHA") {
+				t.Errorf("refusal does not say why: %v", err)
+			}
+		})
+	}
+}
+
+// A commit shaped like a flag (merge-base --is-ancestor -x origin/main) would
+// be parsed as one instead of a revision — this is covered by the same SHA
+// check above, since only a literal 40-hex-char string ever passes it. This
+// test is the sibling case: a default branch shaped like a flag, which
+// reaches git fetch the same way and is not constrained to look like a SHA.
+func TestGitReachableRefusesAFlagShapedDefaultBranch(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	_, err := gitReachable(Repo{Path: ".", DefaultBranch: "--upload-pack=/bin/true"}, sha)
+	if err == nil {
+		t.Fatal("gitReachable accepted a default branch shaped like a flag")
+	}
+	if !strings.Contains(err.Error(), "flag") {
+		t.Errorf("refusal does not say why: %v", err)
 	}
 }

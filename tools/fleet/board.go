@@ -8,10 +8,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // PR is the subset of a pull request the board reconciler reasons about.
@@ -95,20 +98,58 @@ func ghDefaultBranch(repo Repo) (string, error) {
 }
 
 // reachabilityChecker reports whether commit is still an ancestor of
-// defaultBranch. Injected the same way prLister is: a unit test fakes the
+// repo.DefaultBranch. Injected the same way prLister is: a unit test fakes the
 // answer for every scenario except the one this type exists for, and only the
 // conformance test drives real git through a genuine merge-then-rewrite
 // history — mocking the answer is exactly what would have passed before this
 // existed (fw-n1r).
-type reachabilityChecker func(repo Repo, commit, defaultBranch string) (bool, error)
+type reachabilityChecker func(repo Repo, commit string) (bool, error)
+
+// fetchTimeout bounds one reachability fetch. reconcileBoards refuses to plan
+// until every repo's reconcile returns, so a stalled remote — a dead
+// credential-helper prompt, a half-open connection — must not hang the whole
+// fleet; it should cost one bead a "failed" line instead.
+const fetchTimeout = 20 * time.Second
+
+// fullSHA matches gh's mergeCommit.oid shape: a 40-character hex object id.
+// commit reaches git as a bare positional argument to both fetch and
+// merge-base; git's revision grammar accepts far more than a literal SHA
+// there (branch names, HEAD, ":/<regex>", anything starting with "-" is read
+// as a flag — merge-base --is-ancestor <flag> origin/<default> can be made to
+// answer wrongly). Requiring the exact shape gh promises rules out all of it
+// at once, rather than trying to escape each case individually.
+var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // gitReachable is the real reachabilityChecker. It fetches the default branch
 // fresh, then asks git whether commit is still an ancestor of it.
 //
 // Fetch first, or the answer is about whatever origin/<default> last happened
 // to be — the exact stale remote-tracking ref this exists to stop trusting.
-func gitReachable(repo Repo, commit, defaultBranch string) (bool, error) {
-	if out, err := inDir(repo.Path, "git", "fetch", "origin", defaultBranch).CombinedOutput(); err != nil {
+//
+// ponytail: the fetch pulls only repo.DefaultBranch, so a merge commit whose
+// objects were never in this clone (a fresh checkout made after the rewrite,
+// rather than the fleet's usual standing one) resolves as "failed", not
+// "unreachable" — merge-base cannot see an object it was never given. The
+// fleet's clones are long-lived, so the commit is normally already local from
+// before any rewrite; the upgrade, if a fresh clone ever needs this, is
+// fetching the PR's head ref too.
+//
+// ponytail: called once per merged bead, so a cycle with several merges of
+// its own fetches the same default branch that many times over. Sharing one
+// fetch across a ReconcileBoard call would need the checker to carry state
+// between calls instead of being a plain function; the upgrade is worth it
+// if a roster's merge volume ever makes this cycle slow, not before.
+func gitReachable(repo Repo, commit string) (bool, error) {
+	if !fullSHA.MatchString(commit) {
+		return false, fmt.Errorf("mergeCommit %q is not a 40-character SHA — refusing to hand it to git as a revision", commit)
+	}
+	defaultBranch := repo.DefaultBranch
+	if strings.HasPrefix(defaultBranch, "-") {
+		return false, fmt.Errorf("default branch %q looks like a flag, not a ref — refusing to hand it to git", defaultBranch)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	if out, err := inDirContext(ctx, repo.Path, "git", "fetch", "origin", defaultBranch).CombinedOutput(); err != nil {
 		return false, fmt.Errorf("git fetch origin %s: %w: %s", defaultBranch, err, strings.TrimSpace(string(out)))
 	}
 	err := inDir(repo.Path, "git", "merge-base", "--is-ancestor", commit, "origin/"+defaultBranch).Run()
@@ -219,17 +260,35 @@ func ReconcileBoard(repo Repo, bd bdClient, list prLister, reachable reachabilit
 			continue
 		}
 		// baseRefName passed; reachability is the second, independent question.
-		// Checked before "kept" too — a stack whose parent merge was rewritten
-		// out from under it is not "still in review", it is gone.
-		ok, rerr := reachable(repo, merged[0].MergeCommit.OID, repo.DefaultBranch)
-		if rerr != nil {
-			out = append(out, BoardClose{
-				Repo: repo.Name, Bead: b.ID, PR: merged[0].Number, Action: "failed",
-				Detail: fmt.Sprintf("could not confirm PR #%d's merge is still reachable: %v", merged[0].Number, rerr),
-			})
-			continue
+		// A bead can have more than one PR that merged onto the default branch
+		// — a follow-up PR for the same bead happens — so every one is checked
+		// and the bead closes on the first still reachable, not blindly on
+		// whichever gh happened to list first. Checked before "kept" too: a
+		// stack whose only reachable parent merge was rewritten out from under
+		// it is not "still in review", it is gone.
+		var landed PR
+		found := false
+		var checkErr error
+		for _, m := range merged {
+			ok, rerr := reachable(repo, m.MergeCommit.OID)
+			if rerr != nil {
+				checkErr = rerr
+				continue
+			}
+			if ok {
+				landed = m
+				found = true
+				break
+			}
 		}
-		if !ok {
+		if !found {
+			if checkErr != nil {
+				out = append(out, BoardClose{
+					Repo: repo.Name, Bead: b.ID, PR: merged[0].Number, Action: "failed",
+					Detail: fmt.Sprintf("could not confirm PR #%d's merge is still reachable: %v", merged[0].Number, checkErr),
+				})
+				continue
+			}
 			out = append(out, BoardClose{
 				Repo: repo.Name, Bead: b.ID, PR: merged[0].Number, Action: "merged-not-reachable",
 				Detail: fmt.Sprintf("PR #%d merged into %s, but the merge commit is no longer reachable from %s — "+
@@ -248,30 +307,30 @@ func ReconcileBoard(repo Repo, bd bdClient, list prLister, reachable reachabilit
 			detour = fmt.Sprintf(" — NOTE: PR #%d for this bead merged into %s, not %s",
 				elsewhere[0].Number, elsewhere[0].BaseRefName, repo.DefaultBranch)
 		}
-		c := BoardClose{Repo: repo.Name, Bead: b.ID, PR: merged[0].Number}
+		c := BoardClose{Repo: repo.Name, Bead: b.ID, PR: landed.Number}
 		if len(open) > 0 {
 			// A merged parent with an open child is a stack still in review.
 			// The bead is not done until the last PR lands, and closing it now
 			// would drop the child out of the review-load count (weight.go).
 			c.Action = "kept"
 			c.Detail = fmt.Sprintf("PR #%d merged but #%d is still open — closes when the stack lands",
-				merged[0].Number, open[0].Number)
+				landed.Number, open[0].Number)
 			out = append(out, c)
 			continue
 		}
 		if !execute {
-			c.Action, c.Detail = "would-close", fmt.Sprintf("PR #%d merged: %s — pass -execute to close%s", merged[0].Number, oneLine(merged[0].Title), detour)
+			c.Action, c.Detail = "would-close", fmt.Sprintf("PR #%d merged: %s — pass -execute to close%s", landed.Number, oneLine(landed.Title), detour)
 			out = append(out, c)
 			continue
 		}
 		reason := fmt.Sprintf("PR #%d merged: %s — closed by fleet reconcile-board; the fleet never merges, so this is how the merge reaches the board (fw-y1y)%s",
-			merged[0].Number, oneLine(merged[0].Title), detour)
+			landed.Number, oneLine(landed.Title), detour)
 		if err := bd.close(b.ID, reason); err != nil {
 			c.Action, c.Detail = "failed", err.Error()
 			out = append(out, c)
 			continue
 		}
-		c.Action, c.Detail = "closed", fmt.Sprintf("PR #%d merged: %s%s", merged[0].Number, oneLine(merged[0].Title), detour)
+		c.Action, c.Detail = "closed", fmt.Sprintf("PR #%d merged: %s%s", landed.Number, oneLine(landed.Title), detour)
 		out = append(out, c)
 	}
 	return append(out, alreadyClosedElsewhere(repo, bd, prs)...), nil
