@@ -2,8 +2,6 @@
 package main
 
 import (
-	"encoding/json"
-	"os/exec"
 	"strings"
 )
 
@@ -55,17 +53,12 @@ func weightOf(as []Assignment) int {
 // the safe error is to over-estimate pressure and start less work, never to
 // under-estimate it and pile onto a queue nobody can clear.
 func ghReviewLoad(repo Repo) int {
-	out, err := exec.Command("gh", "pr", "list", "--repo", "jamesponwith/"+repo.Name,
-		"--state", "open", "--json", "headRefName").Output()
-	if err != nil {
-		// Cannot tell: assume the queue is clear rather than blocking the
-		// fleet on a flaky network. The kill switch is the tool for stopping.
-		return 0
-	}
 	var prs []struct {
 		HeadRefName string `json:"headRefName"`
 	}
-	if json.Unmarshal(out, &prs) != nil {
+	// Cannot tell: assume the queue is clear rather than blocking the fleet on
+	// a flaky network. The kill switch is the tool for stopping.
+	if ghJSON(repo, []string{"pr", "list", "--state", "open"}, "headRefName", &prs) != nil {
 		return 0
 	}
 	total := 0

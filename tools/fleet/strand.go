@@ -115,7 +115,7 @@ func ReleaseStranded(repo Repo, bd bdClient) (*Stranded, error) {
 	// to zero and a real branch could be misread as empty. Upgrade path:
 	// resolve and persist repo.DefaultBranch once per roster load, then pass
 	// it into commitsOn everywhere it's called instead of hardcoding "main".
-	if n := commitsOn(repo.Path, m.Branch); n > 0 {
+	if n := commitsOn(repo.Path, repo.DefaultBranch, m.Branch); n > 0 {
 		// Work exists, possibly already pushed and under review. Not this
 		// function's call to touch.
 		return nil, clearManifest(repo.Path)

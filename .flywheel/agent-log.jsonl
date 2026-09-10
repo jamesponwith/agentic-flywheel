@@ -89,3 +89,5 @@
 {"ts":"2026-09-04T22:33:37Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-ojk","bead":"fw-ojk","pr":"79"}
 {"ts":"2026-09-10T09:31:05Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-tf4","bead":"fw-tf4"}
 {"ts":"2026-09-10T09:50:03Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-tf4","bead":"fw-tf4","pr":"80"}
+{"ts":"2026-09-10T10:19:49Z","event":"bead.claimed","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-64x","bead":"fw-64x"}
+{"ts":"2026-09-10T10:48:43Z","event":"bead.pr_opened","agent":"fleet/builder-go","repo":"agentic-flywheel-fw-64x","bead":"fw-64x","pr":"82"}
