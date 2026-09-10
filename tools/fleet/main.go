@@ -500,13 +500,22 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 	if err != nil {
 		return err
 	}
-	// Reconcile before allocating. A killed run leaves a worktree and branch
-	// behind, and `git worktree add -b bead/<id>` is fatal when the branch
-	// exists — so without this, one bad night removes those beads from the
-	// fleet's reach permanently (fw-lb8.9).
+	// Release stranded beads and reconcile leftover worktrees before
+	// allocating. ReleaseStranded fixes the bd side of a killed run — a bead
+	// the fleet claimed but never released because the coordinator itself
+	// was killed, not just the builder it spawned (fw-tf4). Reconcile fixes
+	// the git side: a killed run leaves a worktree and branch behind, and
+	// `git worktree add -b bead/<id>` is fatal when the branch exists — so
+	// without it, one bad night removes those beads from the fleet's reach
+	// permanently (fw-lb8.9).
 	for _, repo := range r.Repos {
 		if repo.Paused {
 			continue
+		}
+		if s, err := ReleaseStranded(repo, bdClient{dir: repo.Path, run: execBD}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: release stranded %s: %v\n", repo.Name, err)
+		} else if s != nil {
+			fmt.Printf("  released %-22s %-12s stranded by a killed run — %s\n", repo.Name, s.Bead, s.Agent)
 		}
 		left, err := Reconcile(repo)
 		if err != nil {
