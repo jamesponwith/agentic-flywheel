@@ -267,6 +267,19 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		_ = git2(repo.Path, "worktree", "remove", "--force", wt)
 	}()
 
+	// fw-tf4: mark this bead as claimed by the fleet before the agent starts.
+	// The kill-switch poll below only cancels the CHILD via its context; if
+	// the coordinator itself is killed outright, none of build()'s defers run
+	// and the bead is left in_progress with no lease and no trace of ever
+	// having been dispatched. This manifest is that trace — cleared on every
+	// ordinary return from build(), so only a kill leaves it behind for the
+	// next run's ReleaseStranded to find.
+	if err := writeManifest(repo.Path, runManifest{Bead: a.Bead, Branch: branch, Agent: a.Agent, Started: b.Started}); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write run manifest for %s: %v\n", a.Bead, err)
+	} else {
+		defer func() { _ = clearManifest(repo.Path) }()
+	}
+
 	// blackbird ties a name to its FIRST registration token, permanently. A
 	// run that registers <repo>/builder and drops the token burns that name —
 	// every later run gets UNAUTHENTICATED and invents <repo>/builder-<bead>

@@ -523,6 +523,17 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 			continue
 		}
 		repo := r.Repos[i]
+
+		// The bd side of a killed run: a bead the fleet claimed and never
+		// released, because the COORDINATOR was killed rather than the builder
+		// it spawned. Reconcile below fixes the git side; without both, one
+		// stopped run takes a bead out of the fleet's reach until a person
+		// notices (fw-tf4).
+		if s, err := ReleaseStranded(repo, bdClient{dir: repo.Path, run: execBD}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: release stranded %s: %v\n", repo.Name, err)
+		} else if s != nil {
+			fmt.Printf("  released %-22s %-12s stranded by a killed run — %s\n", repo.Name, s.Bead, s.Agent)
+		}
 		left, err := Reconcile(repo)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: reconcile %s: %v\n", repo.Name, err)
