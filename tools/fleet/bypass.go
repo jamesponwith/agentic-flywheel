@@ -5,11 +5,11 @@
 // Three signals, all recoverable after the fact from git alone. None of them
 // requires the bypasser to have been honest about it, which is the point:
 //
-//	direct-to-main   a commit on main that belongs to no merged PR, i.e. the
-//	                 Validate gate never ran on it
-//	no-verify        a commit whose tree the pre-commit hook would have
-//	                 rejected (unformatted Go), so the hook was skipped
-//	stale-quarantine a test quarantined longer than its deadline
+//	direct-to-default a commit on the repo's default branch that belongs to
+//	                  no merged PR, i.e. the Validate gate never ran on it
+//	no-verify         a commit whose tree the pre-commit hook would have
+//	                  rejected (unformatted Go), so the hook was skipped
+//	stale-quarantine  a test quarantined longer than its deadline
 //
 // A gate over its bypass budget gets a bead proposing its own deletion. That
 // is the rule enforcing itself.
@@ -51,12 +51,13 @@ var botAuthors = map[string]bool{
 	"web-flow":            true,
 }
 
-// mergedPRCommits returns the set of commits reachable as merge-commit parents
-// on main — everything that arrived through a merge-commit PR.
-func mergedPRCommits(dir string) (map[string]bool, error) {
-	// Merge commits on main are PR merges; their second parent's history is
-	// the PR's commits.
-	out, err := git(dir, "rev-list", "--merges", "main")
+// mergedPRCommits returns the set of commits reachable as merge-commit
+// parents on defaultBranch — everything that arrived through a merge-commit
+// PR.
+func mergedPRCommits(dir, defaultBranch string) (map[string]bool, error) {
+	// Merge commits on the default branch are PR merges; their second
+	// parent's history is the PR's commits.
+	out, err := git(dir, "rev-list", "--merges", defaultBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -74,20 +75,27 @@ func mergedPRCommits(dir string) (map[string]bool, error) {
 	return in, nil
 }
 
-// DetectBypasses walks main's history since `since` (a git revision or date).
-func DetectBypasses(repo, dir, since string) ([]Bypass, error) {
+// DetectBypasses walks repo.DefaultBranch's history since `since` (a git
+// revision or date).
+func DetectBypasses(repo Repo, since string) ([]Bypass, error) {
+	if repo.DefaultBranch == "" {
+		// Refuse rather than guess: diffing against the wrong branch would
+		// either miss every real bypass or flag every legitimate commit on
+		// it, and either failure looks like a clean report (fw-64x).
+		return nil, fmt.Errorf("%s: default branch unknown — cannot tell a bypass from a normal commit without knowing which branch the gate protects", repo.Name)
+	}
 	var out []Bypass
 
-	viaPR, err := mergedPRCommits(dir)
+	viaPR, err := mergedPRCommits(repo.Path, repo.DefaultBranch)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", repo, err)
+		return nil, fmt.Errorf("%s: %w", repo.Name, err)
 	}
 
-	args := []string{"rev-list", "--no-merges", "main"}
+	args := []string{"rev-list", "--no-merges", repo.DefaultBranch}
 	if since != "" {
 		args = append(args, "--since="+since)
 	}
-	list, err := git(dir, args...)
+	list, err := git(repo.Path, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +104,7 @@ func DetectBypasses(repo, dir, since string) ([]Bypass, error) {
 		if viaPR[c] {
 			continue
 		}
-		info, _ := git(dir, "log", "-1", "--format=%s%x00%an", c)
+		info, _ := git(repo.Path, "log", "-1", "--format=%s%x00%an", c)
 		parts := strings.SplitN(strings.TrimSpace(info), "\x00", 2)
 		subject := strings.TrimSpace(parts[0])
 		author := ""
@@ -112,7 +120,7 @@ func DetectBypasses(repo, dir, since string) ([]Bypass, error) {
 			continue // not code; the changelog excludes these too
 		}
 		out = append(out, Bypass{
-			Repo: repo, Kind: "direct-to-main", Commit: c[:min(8, len(c))],
+			Repo: repo.Name, Kind: "direct-to-default", Commit: c[:min(8, len(c))],
 			Detail: subject + " — never passed the PR gate",
 		})
 	}
