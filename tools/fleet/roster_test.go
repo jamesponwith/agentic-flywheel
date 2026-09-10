@@ -59,6 +59,49 @@ func TestLoadRosterExpandsPaths(t *testing.T) {
 	}
 }
 
+// A roster that does not set github_owner must still work: every gh call in
+// the fleet used to hardcode "jamesponwith" directly, so an unset field has
+// to resolve to the same account rather than an empty, broken slug (fw-64x).
+func TestLoadRosterDefaultsGitHubOwner(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "roster.json")
+	if err := os.WriteFile(p, []byte(`{
+      "caps": {"review_weight_per_night":8,"concurrent_builders":1,"repos_per_night":1},
+      "repos": [{"name":"a","path":"a"}], "agents": []}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRoster(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Repos[0].Owner != DefaultGitHubOwner {
+		t.Errorf("owner = %q, want the default %q", r.Repos[0].Owner, DefaultGitHubOwner)
+	}
+}
+
+// A roster naming a different owner must reach every repo — not just the
+// ones a future per-repo override might add — so changing the account is a
+// one-line edit here instead of a hunt through gh call sites (fw-64x).
+func TestLoadRosterHonoursGitHubOwner(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "roster.json")
+	if err := os.WriteFile(p, []byte(`{
+      "github_owner": "some-org",
+      "caps": {"review_weight_per_night":8,"concurrent_builders":1,"repos_per_night":1},
+      "repos": [{"name":"a","path":"a"},{"name":"b","path":"b"}], "agents": []}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRoster(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range r.Repos {
+		if repo.Owner != "some-org" {
+			t.Errorf("%s: owner = %q, want some-org", repo.Name, repo.Owner)
+		}
+	}
+}
+
 func TestCommittedRosterHasNoHostPaths(t *testing.T) {
 	// This repo is public. A roster that hardcodes /home/<someone> publishes
 	// the maintainer's username and only works on one machine.

@@ -15,15 +15,23 @@ import (
 // ran them by hand.
 func reconcileRepo(t *testing.T) Repo {
 	t.Helper()
+	return reconcileRepoOn(t, "main")
+}
+
+// reconcileRepoOn is reconcileRepo with the default branch named branch
+// instead of main, so a test can drive a repo that does not ship from main
+// (fw-64x).
+func reconcileRepoOn(t *testing.T, branch string) Repo {
+	t.Helper()
 	dir := t.TempDir()
-	for _, a := range [][]string{{"init", "-q", "-b", "main"},
+	for _, a := range [][]string{{"init", "-q", "-b", branch},
 		{"config", "user.email", "r@invalid"}, {"config", "user.name", "r"},
 		{"commit", "-q", "--allow-empty", "-m", "root"}} {
 		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
 	}
-	return Repo{Name: "r", Path: dir}
+	return Repo{Name: "r", Path: dir, DefaultBranch: branch}
 }
 
 func addWorktree(t *testing.T, repo Repo, bead string, commits int) string {
@@ -101,5 +109,54 @@ func TestReconcileIgnoresNonBeadWorktrees(t *testing.T) {
 	}
 	if _, err := os.Stat(wt); err != nil {
 		t.Error("human worktree removed")
+	}
+}
+
+// commitsOn used to hardcode "main.."+branch, so on a repo whose default
+// branch is not main it would diff against a ref that does not exist, treat
+// every leftover as zero commits, and sweep — force-deleting a branch that
+// may carry real, unmerged work. Same scenarios as the two tests above, just
+// on a repo that ships from "trunk" (fw-64x).
+func TestReconcileOnNonMainDefaultBranch(t *testing.T) {
+	repo := reconcileRepoOn(t, "trunk")
+	_ = addWorktree(t, repo, "keep-1", 2)
+
+	got, err := Reconcile(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Action != "kept" || got[0].Commits != 2 {
+		t.Fatalf("got %+v, want one kept leftover with 2 commits", got)
+	}
+	if _, err := inDir(repo.Path, "git", "rev-parse", "--verify", "bead/keep-1").Output(); err != nil {
+		t.Error("branch with commits was deleted; that is unmerged work destroyed")
+	}
+
+	empty := reconcileRepoOn(t, "trunk")
+	addWorktree(t, empty, "sweep-1", 0)
+	got, err = Reconcile(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Action != "swept" {
+		t.Fatalf("got %+v, want one swept leftover", got)
+	}
+}
+
+// Without a default branch there is no ref to diff a leftover against —
+// commitsOn would read every leftover as zero commits and sweep branches that
+// may carry real work. Refuse rather than guess, the same way
+// ReconcileBoard refuses (fw-64x).
+func TestReconcileRefusesWithoutADefaultBranch(t *testing.T) {
+	repo := reconcileRepo(t)
+	repo.DefaultBranch = ""
+	_ = addWorktree(t, repo, "keep-1", 2)
+
+	got, err := Reconcile(repo)
+	if err == nil {
+		t.Fatal("reconciled against an unknown default branch")
+	}
+	if got != nil {
+		t.Errorf("got %+v, want nil on refusal", got)
 	}
 }

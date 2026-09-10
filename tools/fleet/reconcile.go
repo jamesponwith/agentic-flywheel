@@ -31,6 +31,13 @@ type Leftover struct {
 
 // Reconcile sweeps abandoned builder worktrees in one repo.
 func Reconcile(repo Repo) ([]Leftover, error) {
+	if repo.DefaultBranch == "" {
+		// Refuse rather than guess: commitsOn without a default branch would
+		// diff against an empty ref, read every leftover as zero commits, and
+		// sweep — force-deleting branches that may carry real, unmerged work
+		// (fw-64x).
+		return nil, fmt.Errorf("%s: default branch unknown — cannot tell a leftover with real commits from an empty one", repo.Name)
+	}
 	out, err := inDir(repo.Path, "git", "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", repo.Name, err)
@@ -57,7 +64,7 @@ func Reconcile(repo Repo) ([]Leftover, error) {
 
 	for i := range found {
 		l := &found[i]
-		l.Commits = commitsOn(repo.Path, l.Branch)
+		l.Commits = commitsOn(repo.Path, repo.DefaultBranch, l.Branch)
 		if l.Commits > 0 {
 			// Somebody's work. Detach the worktree so the ground is free, but
 			// never touch the branch — destroying unmerged commits to tidy up
@@ -85,9 +92,11 @@ func Reconcile(repo Repo) ([]Leftover, error) {
 
 // commitsOn counts commits a branch carries over the repo's default branch.
 // Unlike commitsSince this has no recorded base, because a stranded builder
-// left no record of where it started.
-func commitsOn(dir, branch string) int {
-	out, err := inDir(dir, "git", "rev-list", "--count", "main.."+branch).Output()
+// left no record of where it started. defaultBranch is the caller's, never
+// assumed: a repo that ships from something other than main would have this
+// diff against the wrong ref and read every leftover as empty (fw-64x).
+func commitsOn(dir, defaultBranch, branch string) int {
+	out, err := inDir(dir, "git", "rev-list", "--count", defaultBranch+".."+branch).Output()
 	if err != nil {
 		return 0
 	}

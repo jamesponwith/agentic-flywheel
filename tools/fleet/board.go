@@ -8,9 +8,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -37,19 +35,10 @@ func ghPRs(repo Repo) ([]PR, error) {
 	// beads that matter are the ones whose PR merged recently, and 200 is
 	// months of this fleet's throughput. The upgrade is --search with a
 	// merged:> date, once the list is long enough to page.
-	out, err := exec.Command("gh", "pr", "list", "--repo", "jamesponwith/"+repo.Name,
-		"--state", "all", "--limit", "200", "--json", "number,state,title,headRefName,baseRefName").Output()
-	if err != nil {
-		// Keep stderr: "auth expired", "rate limited" and "no such repo" are
-		// different problems, and the caller's refusal to plan should say which.
-		if ee, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("gh pr list: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, fmt.Errorf("gh pr list: %w", err)
-	}
 	var prs []PR
-	if err := json.Unmarshal(out, &prs); err != nil {
-		return nil, fmt.Errorf("gh pr list: %w", err)
+	if err := ghJSON(repo, []string{"pr", "list", "--state", "all", "--limit", "200"},
+		"number,state,title,headRefName,baseRefName", &prs); err != nil {
+		return nil, err
 	}
 	return prs, nil
 }
@@ -60,21 +49,13 @@ func ghPRs(repo Repo) ([]PR, error) {
 // same gh that reports the merge reports where it landed, so the two answers
 // cannot disagree.
 func ghDefaultBranch(repo Repo) (string, error) {
-	out, err := exec.Command("gh", "repo", "view", "jamesponwith/"+repo.Name,
-		"--json", "defaultBranchRef").Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("gh repo view: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return "", fmt.Errorf("gh repo view: %w", err)
-	}
 	var v struct {
 		DefaultBranchRef struct {
 			Name string `json:"name"`
 		} `json:"defaultBranchRef"`
 	}
-	if err := json.Unmarshal(out, &v); err != nil {
-		return "", fmt.Errorf("gh repo view: %w", err)
+	if err := ghJSON(repo, []string{"repo", "view"}, "defaultBranchRef", &v); err != nil {
+		return "", err
 	}
 	if v.DefaultBranchRef.Name == "" {
 		return "", fmt.Errorf("gh repo view: %s reports no default branch", repo.Name)
