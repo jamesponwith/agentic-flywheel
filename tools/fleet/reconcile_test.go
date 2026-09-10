@@ -15,15 +15,24 @@ import (
 // ran them by hand.
 func reconcileRepo(t *testing.T) Repo {
 	t.Helper()
+	return reconcileRepoOn(t, "main")
+}
+
+// reconcileRepoOn builds a scratch repo whose default branch is defaultBranch
+// — not always "main", because commitsOn used to hardcode that name and
+// silently treat every leftover on a differently-named default branch as
+// empty (fw-boy).
+func reconcileRepoOn(t *testing.T, defaultBranch string) Repo {
+	t.Helper()
 	dir := t.TempDir()
-	for _, a := range [][]string{{"init", "-q", "-b", "main"},
+	for _, a := range [][]string{{"init", "-q", "-b", defaultBranch},
 		{"config", "user.email", "r@invalid"}, {"config", "user.name", "r"},
 		{"commit", "-q", "--allow-empty", "-m", "root"}} {
 		if out, err := inDir(dir, "git", a...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
 	}
-	return Repo{Name: "r", Path: dir}
+	return Repo{Name: "r", Path: dir, DefaultBranch: defaultBranch}
 }
 
 func addWorktree(t *testing.T, repo Repo, bead string, commits int) string {
@@ -101,5 +110,63 @@ func TestReconcileIgnoresNonBeadWorktrees(t *testing.T) {
 	}
 	if _, err := os.Stat(wt); err != nil {
 		t.Error("human worktree removed")
+	}
+}
+
+// commitsOn used to shell out to "main..branch" no matter what the repo's
+// default branch actually was. On a repo shipping from something else, that
+// git command errored, the error was swallowed, and the branch read as
+// empty — which "sweep the empty ones" then deleted, destroying real commits
+// that were never main's to compare against (fw-boy).
+func TestReconcileUsesRepoDefaultBranch(t *testing.T) {
+	repo := reconcileRepoOn(t, "trunk")
+	wt := addWorktree(t, repo, "keep-2", 3)
+
+	got, err := Reconcile(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Action != "kept" || got[0].Commits != 3 {
+		t.Fatalf("got %+v, want one kept leftover with 3 commits", got)
+	}
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Error("worktree not detached — the ground stays occupied")
+	}
+	out, err := inDir(repo.Path, "git", "rev-parse", "--verify", "bead/keep-2").Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		t.Error("branch with commits was deleted; that is unmerged work destroyed")
+	}
+}
+
+// An unresolved default branch must never be treated as "the branch is
+// empty" — that guess is exactly what destroyed unmerged work before this
+// was fixed. It has to fail closed instead.
+func TestReconcileRefusesWithoutDefaultBranchWhenThereIsSomethingToJudge(t *testing.T) {
+	repo := reconcileRepo(t)
+	repo.DefaultBranch = ""
+	addWorktree(t, repo, "unknown-1", 2)
+
+	got, err := Reconcile(repo)
+	if err == nil {
+		t.Fatalf("got %+v, nil error — want a refusal, not a guess", got)
+	}
+	out, verr := inDir(repo.Path, "git", "rev-parse", "--verify", "bead/unknown-1").Output()
+	if verr != nil || strings.TrimSpace(string(out)) == "" {
+		t.Error("branch was deleted despite the unknown default branch")
+	}
+}
+
+// No leftovers means nothing to judge, so an unresolved default branch must
+// not turn a quiet night into a failure.
+func TestReconcileDoesNotNeedDefaultBranchWithNothingToSweep(t *testing.T) {
+	repo := reconcileRepo(t)
+	repo.DefaultBranch = ""
+
+	got, err := Reconcile(repo)
+	if err != nil {
+		t.Fatalf("got error %v, want none — there was nothing to judge", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want no leftovers", got)
 	}
 }

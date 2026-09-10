@@ -36,7 +36,7 @@ func TestConformanceMergedPRLeavesTheReadyQueue(t *testing.T) {
 				return []PR{{Number: 62, State: "MERGED", Title: "the work, merged by a human",
 					HeadRefName: "bead/" + id, BaseRefName: "main"}}, nil
 			}
-			got, err := ReconcileBoard(repo, bdClient{dir: dir, run: execBD}, merged, true)
+			got, err := ReconcileBoard(repo, bdClient{dir: dir, run: execBD}, merged, alwaysReachable, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -63,7 +63,7 @@ func TestConformanceMergedPRLeavesTheReadyQueue(t *testing.T) {
 
 			// And running it again is a no-op — the reconciler must be safe to
 			// call before every allocation.
-			again, err := ReconcileBoard(repo, bdClient{dir: dir, run: execBD}, merged, true)
+			again, err := ReconcileBoard(repo, bdClient{dir: dir, run: execBD}, merged, alwaysReachable, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -83,7 +83,7 @@ func TestConformanceOpenPRDoesNotCloseTheBead(t *testing.T) {
 	got, err := ReconcileBoard(Repo{Name: "scratch", Path: dir, DefaultBranch: "main"}, bdClient{dir: dir, run: execBD},
 		func(Repo) ([]PR, error) {
 			return []PR{{Number: 70, State: "OPEN", HeadRefName: "bead/" + id, BaseRefName: "main"}}, nil
-		}, true)
+		}, alwaysReachable, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestConformanceAPRMergedIntoAFeatureBranchLeavesTheBeadOpen(t *testing.T) {
 		func(Repo) ([]PR, error) {
 			return []PR{{Number: 4, State: "MERGED", Title: "the work, merged into a feature branch",
 				HeadRefName: "bead/" + id, BaseRefName: "fleet/builder-permissions"}}, nil
-		}, true)
+		}, alwaysReachable, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,5 +125,94 @@ func TestConformanceAPRMergedIntoAFeatureBranchLeavesTheBeadOpen(t *testing.T) {
 	// must still be able to see it.
 	if ready := bdIn(t, dir, "ready", "--json"); !strings.Contains(ready, id) {
 		t.Errorf("%s left bd ready without its work reaching main:\n%s", id, ready)
+	}
+}
+
+// TestConformanceForcePushedMergeIsNotClosed is fw-n1r's acceptance criterion
+// against real git history, not a mocked answer. baseRefName correctly says
+// the PR merged into main — fw-ojk's check alone would still close the bead —
+// but a force-push after the merge rewrote main to no longer contain that
+// commit, the way this workspace's own main was force-pushed to strip fixture
+// co-author trailers. baseRefName answers "where was it aimed"; only
+// reachability answers "is it there", and a mocked answer is exactly what
+// would have passed before this check existed.
+func TestConformanceForcePushedMergeIsNotClosed(t *testing.T) {
+	dir := scratchRepo(t)
+	id := newBead(t, dir, "work whose merge gets rewritten out from under it")
+
+	// A bare repo stands in for GitHub: what "origin" means to reconcile.
+	origin := t.TempDir()
+	if err := git2(origin, "init", "-q", "--bare"); err != nil {
+		t.Fatal(err)
+	}
+	if err := git2(dir, "remote", "add", "origin", origin); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := inDir(dir, "git", "commit", "-q", "--allow-empty", "-m", "root").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	root := gitLine(dir, "rev-parse", "HEAD")
+	if err := git2(dir, "push", "-q", "origin", "HEAD:main"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The merge a human made: a bead branch, merged into main with a real
+	// merge commit, then pushed — the state a legitimate merge leaves behind.
+	if err := git2(dir, "checkout", "-q", "-b", "bead/"+id); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := inDir(dir, "git", "commit", "-q", "--allow-empty", "-m", "the work").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	if err := git2(dir, "checkout", "-q", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := inDir(dir, "git", "merge", "--no-ff", "-q", "-m", "merge the work", "bead/"+id).CombinedOutput(); err != nil {
+		t.Fatalf("git merge: %v\n%s", err, out)
+	}
+	mergeSHA := gitLine(dir, "rev-parse", "HEAD")
+	if err := git2(dir, "push", "-q", "origin", "HEAD:main"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The force-push: origin/main is rewritten back to before the merge. The
+	// merge commit still exists as a loose object — nothing has pruned it,
+	// exactly the state a real repo is in right after a rewrite — but it is
+	// no longer an ancestor of origin/main.
+	if err := git2(dir, "push", "-q", "--force", "origin", root+":main"); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := Repo{Name: "scratch", Path: dir, DefaultBranch: "main"}
+	prs := func(Repo) ([]PR, error) {
+		return []PR{{Number: 62, State: "MERGED", Title: "the work, merged then rewritten away",
+			HeadRefName: "bead/" + id, BaseRefName: "main", MergeCommit: ghCommit{OID: mergeSHA}}}, nil
+	}
+	got, err := ReconcileBoard(repo, bdClient{dir: dir, run: execBD}, prs, gitReachable, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Action != "merged-not-reachable" {
+		t.Fatalf("reconcile = %+v, want %s reported as merged-not-reachable", got, id)
+	}
+	if !strings.Contains(got[0].Detail, "reachable") {
+		t.Errorf("report does not say why: %q", got[0].Detail)
+	}
+	if show := bdIn(t, dir, "show", id, "--json"); strings.Contains(show, `"closed"`) {
+		t.Errorf("%s was closed on a merge that was rewritten out of main:\n%s", id, show)
+	}
+	// Still dispatchable: the merge the board can see is gone, so the
+	// coordinator must still be able to see the bead.
+	if ready := bdIn(t, dir, "ready", "--json"); !strings.Contains(ready, id) {
+		t.Errorf("%s left bd ready even though its merge is no longer reachable:\n%s", id, ready)
+	}
+
+	// A second cycle must not somehow paper over the same gap.
+	again, err := ReconcileBoard(repo, bdClient{dir: dir, run: execBD}, prs, gitReachable, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 1 || again[0].Action != "merged-not-reachable" {
+		t.Fatalf("second reconcile = %+v, want the same merged-not-reachable report", again)
 	}
 }

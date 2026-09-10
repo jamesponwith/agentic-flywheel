@@ -8,10 +8,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // PR is the subset of a pull request the board reconciler reasons about.
@@ -24,6 +27,18 @@ type PR struct {
 	// the reconciler cannot tell a landing from a detour (fw-ojk).
 	HeadRefName string `json:"headRefName"`
 	BaseRefName string `json:"baseRefName"`
+	// MergeCommit is the SHA a MERGED PR landed as. baseRefName only answers
+	// where it was aimed; a rewrite (force-push) after the merge leaves the
+	// base unchanged while the commit stops being reachable from it — the gap
+	// this closes (fw-n1r). Empty for a PR that never merged.
+	MergeCommit ghCommit `json:"mergeCommit"`
+}
+
+// ghCommit mirrors gh's nested shape for commit-typed JSON fields —
+// {"oid": "..."} — instead of a bare string; headRefName and baseRefName are
+// already flat because gh exposes them as such, but mergeCommit is not.
+type ghCommit struct {
+	OID string `json:"oid"`
 }
 
 // prLister lists a repo's pull requests. Injected so tests never touch gh.
@@ -37,19 +52,13 @@ func ghPRs(repo Repo) ([]PR, error) {
 	// beads that matter are the ones whose PR merged recently, and 200 is
 	// months of this fleet's throughput. The upgrade is --search with a
 	// merged:> date, once the list is long enough to page.
-	out, err := exec.Command("gh", "pr", "list", "--repo", "jamesponwith/"+repo.Name,
-		"--state", "all", "--limit", "200", "--json", "number,state,title,headRefName,baseRefName").Output()
-	if err != nil {
-		// Keep stderr: "auth expired", "rate limited" and "no such repo" are
-		// different problems, and the caller's refusal to plan should say which.
-		if ee, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("gh pr list: %w: %s", err, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return nil, fmt.Errorf("gh pr list: %w", err)
-	}
+	//
+	// Through ghJSON so the owner comes from one place (fw-64x) rather than a
+	// hardcoded "jamesponwith/" — this repo is not the only one the fleet runs.
 	var prs []PR
-	if err := json.Unmarshal(out, &prs); err != nil {
-		return nil, fmt.Errorf("gh pr list: %w", err)
+	if err := ghJSON(repo, []string{"pr", "list", "--state", "all", "--limit", "200"},
+		"number,state,title,headRefName,baseRefName,mergeCommit", &prs); err != nil {
+		return nil, err
 	}
 	return prs, nil
 }
@@ -82,12 +91,80 @@ func ghDefaultBranch(repo Repo) (string, error) {
 	return v.DefaultBranchRef.Name, nil
 }
 
+// reachabilityChecker reports whether commit is still an ancestor of
+// repo.DefaultBranch. Injected the same way prLister is: a unit test fakes the
+// answer for every scenario except the one this type exists for, and only the
+// conformance test drives real git through a genuine merge-then-rewrite
+// history — mocking the answer is exactly what would have passed before this
+// existed (fw-n1r).
+type reachabilityChecker func(repo Repo, commit string) (bool, error)
+
+// fetchTimeout bounds one reachability fetch. reconcileBoards refuses to plan
+// until every repo's reconcile returns, so a stalled remote — a dead
+// credential-helper prompt, a half-open connection — must not hang the whole
+// fleet; it should cost one bead a "failed" line instead.
+const fetchTimeout = 20 * time.Second
+
+// fullSHA matches gh's mergeCommit.oid shape: a 40-character hex object id.
+// commit reaches git as a bare positional argument to both fetch and
+// merge-base; git's revision grammar accepts far more than a literal SHA
+// there (branch names, HEAD, ":/<regex>", anything starting with "-" is read
+// as a flag — merge-base --is-ancestor <flag> origin/<default> can be made to
+// answer wrongly). Requiring the exact shape gh promises rules out all of it
+// at once, rather than trying to escape each case individually.
+var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// gitReachable is the real reachabilityChecker. It fetches the default branch
+// fresh, then asks git whether commit is still an ancestor of it.
+//
+// Fetch first, or the answer is about whatever origin/<default> last happened
+// to be — the exact stale remote-tracking ref this exists to stop trusting.
+//
+// ponytail: the fetch pulls only repo.DefaultBranch, so a merge commit whose
+// objects were never in this clone (a fresh checkout made after the rewrite,
+// rather than the fleet's usual standing one) resolves as "failed", not
+// "unreachable" — merge-base cannot see an object it was never given. The
+// fleet's clones are long-lived, so the commit is normally already local from
+// before any rewrite; the upgrade, if a fresh clone ever needs this, is
+// fetching the PR's head ref too.
+//
+// ponytail: called once per merged bead, so a cycle with several merges of
+// its own fetches the same default branch that many times over. Sharing one
+// fetch across a ReconcileBoard call would need the checker to carry state
+// between calls instead of being a plain function; the upgrade is worth it
+// if a roster's merge volume ever makes this cycle slow, not before.
+func gitReachable(repo Repo, commit string) (bool, error) {
+	if !fullSHA.MatchString(commit) {
+		return false, fmt.Errorf("mergeCommit %q is not a 40-character SHA — refusing to hand it to git as a revision", commit)
+	}
+	defaultBranch := repo.DefaultBranch
+	if strings.HasPrefix(defaultBranch, "-") {
+		return false, fmt.Errorf("default branch %q looks like a flag, not a ref — refusing to hand it to git", defaultBranch)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	if out, err := inDirContext(ctx, repo.Path, "git", "fetch", "origin", defaultBranch).CombinedOutput(); err != nil {
+		return false, fmt.Errorf("git fetch origin %s: %w: %s", defaultBranch, err, strings.TrimSpace(string(out)))
+	}
+	err := inDir(repo.Path, "git", "merge-base", "--is-ancestor", commit, "origin/"+defaultBranch).Run()
+	if err == nil {
+		return true, nil
+	}
+	// --is-ancestor signals "no" with exit 1 and every other problem — commit
+	// does not even resolve to an object — with anything else. Absorbing the
+	// second into the first would report a broken check as a force-push found.
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git merge-base --is-ancestor %s origin/%s: %w", commit, defaultBranch, err)
+}
+
 // BoardClose is one bead the reconciler acted on, or deliberately did not.
 type BoardClose struct {
 	Repo   string `json:"repo"`
 	Bead   string `json:"bead"`
 	PR     int    `json:"pr"`
-	Action string `json:"action"` // closed | would-close | kept | merged-elsewhere | closed-elsewhere | failed
+	Action string `json:"action"` // closed | would-close | kept | merged-elsewhere | closed-elsewhere | merged-not-reachable | failed
 	Detail string `json:"detail"`
 }
 
@@ -115,13 +192,24 @@ func oneLine(s string) string {
 // A listing failure is an error, not an empty list: "gh is down" and "nothing
 // merged" must not look alike, because the second one dispatches builders.
 //
+// baseRefName answers "where was it aimed", not "is it there". A PR that
+// merged onto repo.DefaultBranch is still checked for reachability: the merge
+// commit must be an ancestor of the default branch right now, fetched fresh.
+// A force-push can rewrite history well after a correct merge — this
+// workspace's main was, to strip fixture trailers — leaving baseRefName
+// intact while the commit it named is gone. That bead is reported as
+// "merged-not-reachable" and left open; it wants a human, not a retry
+// (fw-n1r). A reachability check that itself fails to answer is reported as
+// "failed" for that one bead, the same as a failed bd close — one bad bead
+// must not hide the rest of the board.
+//
 // ponytail: a bead a human reopened after its PR merged is closed again on the
 // next cycle, because the PR stays MERGED forever. Reverted or broken work
 // gets a new bead — one PR is one idea (ADR 0009), and a reopened one would
 // be a second idea under the first's name. A fork PR titled after a bead can
 // force "kept" and a rebuild; this repo takes no outside PRs, and the cost is
 // the pre-existing behaviour, not a new one.
-func ReconcileBoard(repo Repo, bd bdClient, list prLister, execute bool) ([]BoardClose, error) {
+func ReconcileBoard(repo Repo, bd bdClient, list prLister, reachable reachabilityChecker, execute bool) ([]BoardClose, error) {
 	if repo.DefaultBranch == "" {
 		return nil, fmt.Errorf("%s: default branch unknown — cannot tell a merge that ships from one into a feature branch, and closing on the second loses the work (fw-ojk)", repo.Name)
 	}
@@ -165,6 +253,44 @@ func ReconcileBoard(repo Repo, bd bdClient, list prLister, execute bool) ([]Boar
 			})
 			continue
 		}
+		// baseRefName passed; reachability is the second, independent question.
+		// A bead can have more than one PR that merged onto the default branch
+		// — a follow-up PR for the same bead happens — so every one is checked
+		// and the bead closes on the first still reachable, not blindly on
+		// whichever gh happened to list first. Checked before "kept" too: a
+		// stack whose only reachable parent merge was rewritten out from under
+		// it is not "still in review", it is gone.
+		var landed PR
+		found := false
+		var checkErr error
+		for _, m := range merged {
+			ok, rerr := reachable(repo, m.MergeCommit.OID)
+			if rerr != nil {
+				checkErr = rerr
+				continue
+			}
+			if ok {
+				landed = m
+				found = true
+				break
+			}
+		}
+		if !found {
+			if checkErr != nil {
+				out = append(out, BoardClose{
+					Repo: repo.Name, Bead: b.ID, PR: merged[0].Number, Action: "failed",
+					Detail: fmt.Sprintf("could not confirm PR #%d's merge is still reachable: %v", merged[0].Number, checkErr),
+				})
+				continue
+			}
+			out = append(out, BoardClose{
+				Repo: repo.Name, Bead: b.ID, PR: merged[0].Number, Action: "merged-not-reachable",
+				Detail: fmt.Sprintf("PR #%d merged into %s, but the merge commit is no longer reachable from %s — "+
+					"history was rewritten after the merge (force-push); a human should check whether the work survived",
+					merged[0].Number, repo.DefaultBranch, repo.DefaultBranch),
+			})
+			continue
+		}
 		// A bead can have both: a small PR onto the default branch and the real
 		// work merged elsewhere. The bead still closes — something did land —
 		// but the close says where the rest went, because a builder writes its
@@ -175,30 +301,30 @@ func ReconcileBoard(repo Repo, bd bdClient, list prLister, execute bool) ([]Boar
 			detour = fmt.Sprintf(" — NOTE: PR #%d for this bead merged into %s, not %s",
 				elsewhere[0].Number, elsewhere[0].BaseRefName, repo.DefaultBranch)
 		}
-		c := BoardClose{Repo: repo.Name, Bead: b.ID, PR: merged[0].Number}
+		c := BoardClose{Repo: repo.Name, Bead: b.ID, PR: landed.Number}
 		if len(open) > 0 {
 			// A merged parent with an open child is a stack still in review.
 			// The bead is not done until the last PR lands, and closing it now
 			// would drop the child out of the review-load count (weight.go).
 			c.Action = "kept"
 			c.Detail = fmt.Sprintf("PR #%d merged but #%d is still open — closes when the stack lands",
-				merged[0].Number, open[0].Number)
+				landed.Number, open[0].Number)
 			out = append(out, c)
 			continue
 		}
 		if !execute {
-			c.Action, c.Detail = "would-close", fmt.Sprintf("PR #%d merged: %s — pass -execute to close%s", merged[0].Number, oneLine(merged[0].Title), detour)
+			c.Action, c.Detail = "would-close", fmt.Sprintf("PR #%d merged: %s — pass -execute to close%s", landed.Number, oneLine(landed.Title), detour)
 			out = append(out, c)
 			continue
 		}
 		reason := fmt.Sprintf("PR #%d merged: %s — closed by fleet reconcile-board; the fleet never merges, so this is how the merge reaches the board (fw-y1y)%s",
-			merged[0].Number, oneLine(merged[0].Title), detour)
+			landed.Number, oneLine(landed.Title), detour)
 		if err := bd.close(b.ID, reason); err != nil {
 			c.Action, c.Detail = "failed", err.Error()
 			out = append(out, c)
 			continue
 		}
-		c.Action, c.Detail = "closed", fmt.Sprintf("PR #%d merged: %s%s", merged[0].Number, oneLine(merged[0].Title), detour)
+		c.Action, c.Detail = "closed", fmt.Sprintf("PR #%d merged: %s%s", landed.Number, oneLine(landed.Title), detour)
 		out = append(out, c)
 	}
 	return append(out, alreadyClosedElsewhere(repo, bd, prs)...), nil

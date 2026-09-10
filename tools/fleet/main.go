@@ -153,22 +153,24 @@ func reconcileBoards(r Roster, w io.Writer, execute bool) ([]BoardClose, error) 
 	}
 	var all []BoardClose
 	var failed []string
-	for _, repo := range r.Repos {
-		if repo.Paused {
+	for i := range r.Repos {
+		if r.Repos[i].Paused {
 			continue
 		}
 		// Resolved here rather than in LoadRoster: every other fleet command
 		// loads the roster too, and none of them should need the network.
-		if repo.DefaultBranch == "" {
-			branch, err := ghDefaultBranch(repo)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "reconcile-board: %s: %v\n", repo.Name, err)
-				failed = append(failed, repo.Name)
-				continue
-			}
-			repo.DefaultBranch = branch
+		// Resolving by index rather than a range-loop copy persists the
+		// answer onto r.Repos itself — Repos is a slice, shared backing array
+		// even though Roster is passed by value — so Reconcile and
+		// DetectBypasses downstream see it too instead of asking gh again
+		// (fw-64x, fw-boy).
+		if err := resolveDefaultBranch(&r.Repos[i]); err != nil {
+			fmt.Fprintf(os.Stderr, "reconcile-board: %s: %v\n", r.Repos[i].Name, err)
+			failed = append(failed, r.Repos[i].Name)
+			continue
 		}
-		got, err := ReconcileBoard(repo, bdClient{dir: repo.Path, run: execBD}, ghPRs, execute)
+		repo := r.Repos[i]
+		got, err := ReconcileBoard(repo, bdClient{dir: repo.Path, run: execBD}, ghPRs, gitReachable, execute)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconcile-board: %v\n", err)
 			failed = append(failed, repo.Name)
@@ -217,9 +219,10 @@ func doReconcileBoard(rosterPath string, execute, asJSON bool) error {
 	case !execute && pending > 0:
 		fmt.Println("DRY RUN — pass -execute to close them")
 	case !execute:
-		// merged-elsewhere and closed-elsewhere close nothing under any flag;
-		// offering -execute would promise an action that does not exist.
-		fmt.Println("nothing to close — the lines above are work that did not reach the default branch")
+		// merged-elsewhere, closed-elsewhere, kept, merged-not-reachable and
+		// failed close nothing under any flag; offering -execute would promise
+		// an action that does not exist.
+		fmt.Println("nothing to close — the lines above name what this cycle would not close, and why")
 	}
 	return nil
 }
@@ -379,10 +382,14 @@ func doBypasses(rosterPath, since string, asJSON bool) error {
 		return err
 	}
 	var all []Bypass
-	for _, repo := range r.Repos {
-		bs, err := DetectBypasses(repo.Name, repo.Path, since)
+	for i := range r.Repos {
+		if err := resolveDefaultBranch(&r.Repos[i]); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", r.Repos[i].Name, err)
+			continue
+		}
+		bs, err := DetectBypasses(r.Repos[i], since)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", repo.Name, err)
+			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", r.Repos[i].Name, err)
 			continue
 		}
 		all = append(all, bs...)
@@ -500,13 +507,32 @@ func doRun(rosterPath string, execute bool, perBuilder time.Duration, onlyBead s
 	if err != nil {
 		return err
 	}
-	// Reconcile before allocating. A killed run leaves a worktree and branch
-	// behind, and `git worktree add -b bead/<id>` is fatal when the branch
-	// exists — so without this, one bad night removes those beads from the
-	// fleet's reach permanently (fw-lb8.9).
-	for _, repo := range r.Repos {
-		if repo.Paused {
+	// Reconcile abandoned builder worktrees. A killed run leaves a worktree
+	// and branch behind, and `git worktree add -b bead/<id>` is fatal when the
+	// branch exists — so without this, one bad night removes those beads from
+	// the fleet's reach permanently (fw-lb8.9). Resolves each repo's default
+	// branch itself (persisting it onto r.Repos) rather than relying on
+	// reconcileBoards below to have done it first: one repo's gh failure must
+	// not block sweeping every other repo (fw-64x).
+	for i := range r.Repos {
+		if r.Repos[i].Paused {
 			continue
+		}
+		if err := resolveDefaultBranch(&r.Repos[i]); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: reconcile %s: %v\n", r.Repos[i].Name, err)
+			continue
+		}
+		repo := r.Repos[i]
+
+		// The bd side of a killed run: a bead the fleet claimed and never
+		// released, because the COORDINATOR was killed rather than the builder
+		// it spawned. Reconcile below fixes the git side; without both, one
+		// stopped run takes a bead out of the fleet's reach until a person
+		// notices (fw-tf4).
+		if s, err := ReleaseStranded(repo, bdClient{dir: repo.Path, run: execBD}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: release stranded %s: %v\n", repo.Name, err)
+		} else if s != nil {
+			fmt.Printf("  released %-22s %-12s stranded by a killed run — %s\n", repo.Name, s.Bead, s.Agent)
 		}
 		left, err := Reconcile(repo)
 		if err != nil {
