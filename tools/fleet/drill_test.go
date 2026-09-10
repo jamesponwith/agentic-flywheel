@@ -63,6 +63,38 @@ func TestDrillKilledBuilderReturnsWorkToTheQueue(t *testing.T) {
 	}
 }
 
+// DRILL: the COORDINATOR dies mid-flight, not the builder it spawned. This is
+// the sibling fw-lb8.7 does not cover: that recovery runs inside build(),
+// which never returns if the process running it is the one that gets killed.
+// reclaim cannot substitute — the builder claimed bare, with no lease to ever
+// expire — so the bead's only way back to the queue is the manifest the
+// coordinator wrote before it died (fw-tf4).
+func TestDrillCoordinatorKilledMidFlightReleasesTheBead(t *testing.T) {
+	dir := drillRepo(t)
+	repo := Repo{Name: "drill", Path: dir}
+	id := bdIn(t, dir, "create", "work whose coordinator dies", "--silent")
+	bdIn(t, dir, "update", id, "--claim") // bare claim, no lease — exactly what a builder does
+	addWorktree(t, repo, id, 0)           // the builder's own worktree, no commits yet
+
+	// The coordinator wrote its manifest before spawning the builder, then
+	// was killed outright — SIGKILL, not the child's own timeout — before its
+	// defer could clear it.
+	if err := writeManifest(dir, runManifest{Bead: id, Branch: "bead/" + id, Agent: "drill/builder"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReleaseStranded(repo, bdClient{dir: dir, run: execBD})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Bead != id {
+		t.Fatalf("released %+v, want %s", got, id)
+	}
+	if !strings.Contains(bdIn(t, dir, "ready", "--json"), id) {
+		t.Error("the bead did not return to the queue — the fleet would starve on the coordinator's own death, not just a builder's")
+	}
+}
+
 // DRILL: the kill switch is thrown while builders are allocated.
 func TestDrillKillSwitchStopsAnActiveCycle(t *testing.T) {
 	dir := drillRepo(t)
