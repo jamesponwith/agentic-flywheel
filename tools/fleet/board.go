@@ -69,7 +69,11 @@ func ghPRs(repo Repo) ([]PR, error) {
 // same gh that reports the merge reports where it landed, so the two answers
 // cannot disagree.
 func ghDefaultBranch(repo Repo) (string, error) {
-	out, err := exec.Command("gh", "repo", "view", "jamesponwith/"+repo.Name,
+	// Through ghRepo so the owner comes from one place (fw-64x) rather than a
+	// hardcoded "jamesponwith/" — this was the one caller fw-64x missed, and a
+	// roster whose github_owner isn't jamesponwith failed reconcile-board over
+	// it (fw-atc).
+	out, err := exec.Command("gh", "repo", "view", ghRepo(repo),
 		"--json", "defaultBranchRef").Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
