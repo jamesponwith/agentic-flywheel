@@ -56,9 +56,10 @@
       ],
       "skills": [
         "swift",
-        "kotlin"
+        "kotlin",
+        "rust"
       ]
     }
   ],
-  "_agents_note": "Roster repointed at phux and phux-mobile (fw-6xf), replacing the prior llm-resiliency-router/agentic-flywheel/brax-tennis-rl/spotify-recsys-ecosystem lineup and its builder-go/builder-py agents — neither matched Rust or Swift. ADR 0001: a mechanism with zero call sites cannot improve by next month, so the old repos and agents were dropped rather than paused."
+  "_agents_note": "Roster repointed at phux and phux-mobile (fw-6xf), replacing the prior llm-resiliency-router/agentic-flywheel/brax-tennis-rl/spotify-recsys-ecosystem lineup and its builder-go/builder-py agents — neither matched Rust or Swift. ADR 0001: a mechanism with zero call sites cannot improve by next month, so the old repos and agents were dropped rather than paused. builder-swift gained rust (fw-05r) for the Android epic's FFI/cross-compile beads — phux-mobile has one builder covering the whole repo, not one per language."
 }
