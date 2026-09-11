@@ -1,8 +1,10 @@
 {
-  "_caps_note": "concurrent_builders is now a CEILING, not a fixed width: Run sizes the fleet to the number of distinct repos with ready work, so it never spawns a builder there is nothing for. Two bounds hold it. Globally the ceiling, because every builder draws on ONE account quota \u2014 two of them emptied a session window in 29 minutes. And per repo exactly one, which is the bound that matters: blackbird keys reservations by project_key, so builders in DIFFERENT repos cannot collide, and serialising per repo keeps every builder solo in its own repo rather than re-arming the reservation requirement that cost three runs (fw-k8f). repos_per_night is the roster size, so a night can reach every repo that has work.",
-  "_comment": "The fleet's constitution. Repo paths are relative to workspace_root ($FLYWHEEL_WORKSPACE, or ~/Workspace) so the roster is portable and says nothing about the host. Caps derive from review capacity, not compute (ADR 0006). Readable in ten seconds, diffable in review \u2014 keep it that way.",
+  "_caps_note": "concurrent_builders is now a CEILING, not a fixed width: Run sizes the fleet to the number of distinct repos with ready work, so it never spawns a builder there is nothing for. Two bounds hold it. Globally the ceiling, because every builder draws on ONE account quota — two of them emptied a session window in 29 minutes. And per repo exactly one, which is the bound that matters: blackbird keys reservations by project_key, so builders in DIFFERENT repos cannot collide, and serialising per repo keeps every builder solo in its own repo rather than re-arming the reservation requirement that cost three runs (fw-k8f). repos_per_night is the roster size, so a night can reach every repo that has work.",
+  "_comment": "The fleet's constitution. Repo paths are relative to workspace_root ($FLYWHEEL_WORKSPACE, or ~/Workspace) so the roster is portable and says nothing about the host. Caps derive from review capacity, not compute (ADR 0006). Readable in ten seconds, diffable in review — keep it that way.",
   "workspace_root": "~/Workspace",
-  "_runner": "How a builder is invoked (ADR 0010). The agent is a role, not a product \u2014 swap cmd/args for a different CLI, or set FLYWHEEL_AGENT_CMD to override everywhere including shell hooks. Args here REPLACE the built-in default rather than extending it, so a runner that omits its cost flag reports no spend and every run lands UNMEASURED \u2014 keep --output-format json, or whatever the swapped-in agent calls it.",
+  "_github_owner_note": "phux and phux-mobile are phall1's repos, not jamesponwith's (fw-6xf). github_owner picks which account every gh call in this roster targets (PR create, comment, reconcile) — it is unrelated to local git commit authorship, which is whoever's key signs the commit. The roster is single-owner (Repo.Owner isn't settable per-repo), so this only works while every repo in the roster belongs to the same account.",
+  "github_owner": "phall1",
+  "_runner": "How a builder is invoked (ADR 0010). The agent is a role, not a product — swap cmd/args for a different CLI, or set FLYWHEEL_AGENT_CMD to override everywhere including shell hooks. Args here REPLACE the built-in default rather than extending it, so a runner that omits its cost flag reports no spend and every run lands UNMEASURED — keep --output-format json, or whatever the swapped-in agent calls it.",
   "runner": {
     "cmd": "claude",
     "args": [
@@ -17,86 +19,46 @@
     "review_weight_per_night": 10,
     "concurrent_builders": 5,
     "repos_per_night": 5,
-    "_quota": "The account is a Max subscription. It bills no marginal dollar, so the usd the runner reports is API-equivalent valuation and a measurement only \u2014 there is deliberately no dollar limit anywhere in this file. The real limit is a usage window, and the account states no remaining balance, so nothing here can pace against it in advance. What it does state is the moment the quota returns, in the 429 itself; the fleet records that and waits exactly that long (quotahold.go). window_hours is only how far back 'recent usage' is reported.",
+    "_quota": "The account is a Max subscription. It bills no marginal dollar, so the usd the runner reports is API-equivalent valuation and a measurement only — there is deliberately no dollar limit anywhere in this file. The real limit is a usage window, and the account states no remaining balance, so nothing here can pace against it in advance. What it does state is the moment the quota returns, in the 429 itself; the fleet records that and waits exactly that long (quotahold.go). window_hours is only how far back 'recent usage' is reported.",
     "quota": {
       "window_hours": 8
     }
   },
   "repos": [
     {
-      "name": "llm-resiliency-router",
-      "path": "llm-resiliency-router",
-      "lang": "go"
+      "name": "phux",
+      "path": "phux",
+      "lang": "rust"
     },
     {
-      "name": "agentic-flywheel",
-      "path": "agentic-flywheel",
-      "lang": "go",
-      "skip_stages": [
-        "operate",
-        "release"
-      ]
-    },
-    {
-      "name": "brax-tennis-rl",
-      "path": "brax-tennis-rl",
-      "lang": "python",
-      "skip_stages": [
-        "operate"
-      ]
-    },
-    {
-      "name": "spotify-recsys-ecosystem",
-      "path": "Spotify",
-      "lang": "python",
-      "_note": "A five-app monorepo, not one project. Its own gate is 'make lint-all' plus six pytest suites and takes minutes, so pre-commit runs only the fast checks and the heavy ones stay on demand. Several open beads are corrections to already-published pages, which is why the safety rails went in before the fleet was pointed at it.",
-      "skip_stages": [
-        "operate",
-        "release"
-      ]
-    },
-    {
-      "name": "flywheel-template",
-      "path": "flywheel-template",
-      "lang": "go",
-      "paused": true,
-      "role": "template"
-    },
-    {
-      "name": "flywheel-template-py",
-      "path": "flywheel-template-py",
-      "lang": "python",
-      "paused": true,
-      "role": "template"
+      "name": "phux-mobile",
+      "path": "phux-mobile",
+      "lang": "swift",
+      "_note": "Tuist/Swift iOS app with a Rust FFI layer (rust/phux-mobile-ffi); no Android module yet. builder-swift's skills include kotlin ahead of that work (fw-6xf) — drop it if the Android build ends up needing its own agent instead."
     }
   ],
   "agents": [
     {
-      "name": "fleet/builder-go",
+      "name": "fleet/builder-rust",
       "role": "builder",
       "repos": [
-        "llm-resiliency-router",
-        "agentic-flywheel",
-        "flywheel-template"
+        "phux"
       ],
       "skills": [
-        "go",
-        "shell"
+        "rust"
       ]
     },
     {
-      "name": "fleet/builder-py",
+      "name": "fleet/builder-swift",
       "role": "builder",
       "repos": [
-        "brax-tennis-rl",
-        "spotify-recsys-ecosystem"
+        "phux-mobile"
       ],
       "skills": [
-        "python",
-        "jax",
-        "rl"
+        "swift",
+        "kotlin"
       ]
     }
   ],
-  "_agents_note": "Cut from 8 agents across 5 roles to 2 builders (retro 2026-08). Roster.Match had exactly one call site and only ever matched role=builder; coordinator, reviewer, operator and retro were declared and never dispatched. ADR 0001: a mechanism with zero call sites cannot improve by next month."
+  "_agents_note": "Roster repointed at phux and phux-mobile (fw-6xf), replacing the prior llm-resiliency-router/agentic-flywheel/brax-tennis-rl/spotify-recsys-ecosystem lineup and its builder-go/builder-py agents — neither matched Rust or Swift. ADR 0001: a mechanism with zero call sites cannot improve by next month, so the old repos and agents were dropped rather than paused."
 }
