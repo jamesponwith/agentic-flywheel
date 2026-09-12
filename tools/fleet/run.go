@@ -267,6 +267,19 @@ func build(repo Repo, a Assignment, opts RunOpts) Builder {
 		_ = git2(repo.Path, "worktree", "remove", "--force", wt)
 	}()
 
+	// `git worktree add` only populates tracked content — verified empirically
+	// against a real repo. A Repo.AgentsUntracked repo keeps its agent
+	// scaffolding untracked on purpose (fw-vbt), so without this the worktree
+	// has none of it and every builder regresses to "Unknown command:
+	// /flywheel-next", exactly the failure this whole mechanism exists to fix.
+	if repo.AgentsUntracked {
+		if err := copyLocalAgentArtifacts(repo, wt); err != nil {
+			b.Outcome, b.Detail = "error", "local agent artifacts: "+err.Error()
+			b.Took = time.Since(b.Started)
+			return b
+		}
+	}
+
 	// fw-tf4: mark this bead as claimed by the fleet before the agent starts.
 	// The kill-switch poll below only cancels the CHILD via its context; if
 	// the coordinator itself is killed outright, none of build()'s defers run
@@ -553,6 +566,37 @@ func classify(runErr error, commits int, timedOut bool) string {
 	default:
 		return "green"
 	}
+}
+
+// localAgentArtifacts are the paths copyLocalAgentArtifacts carries into a
+// fresh worktree for a Repo.AgentsUntracked repo. Kept by hand in sync with
+// doctor.go's Manifest agents-stage entries, except .claude/settings.json
+// (already tracked, already in any worktree) and plus settingsLocalPath
+// (never in Manifest — it is the local-override mechanism itself).
+var localAgentArtifacts = []string{
+	".claude/skills/flywheel-next",
+	".claude/skills/flywheel-review",
+	"tools/flywheel/guard.sh",
+	"tools/flywheel/flaky.sh",
+	".flywheel/README.md",
+	settingsLocalPath,
+}
+
+// copyLocalAgentArtifacts carries a Repo.AgentsUntracked repo's untracked
+// agent scaffolding into a freshly created worktree. A missing source is not
+// an error — not every repo carries every artifact (fw-vbt, matching
+// Install()'s same tolerance in doctor.go).
+func copyLocalAgentArtifacts(repo Repo, wt string) error {
+	for _, rel := range localAgentArtifacts {
+		src := filepath.Join(repo.Path, rel)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if err := copyPath(src, filepath.Join(wt, rel)); err != nil {
+			return fmt.Errorf("%s: %w", rel, err)
+		}
+	}
+	return nil
 }
 
 // clearEmptyBranch removes a leftover bead branch that carries no work, so a

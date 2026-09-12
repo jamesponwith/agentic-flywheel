@@ -125,6 +125,19 @@ type Repo struct {
 	Path       string   `json:"path"`
 	Lang       string   `json:"lang"`
 	Paused     bool     `json:"paused,omitempty"`
+	// AgentsUntracked means this repo's owner keeps agent scaffolding
+	// (.claude/skills/flywheel-*, tools/flywheel/guard.sh, .flywheel/README.md,
+	// and builder permissions in .claude/settings.local.json rather than
+	// settings.json) as untracked, .git/info/exclude'd local state — a
+	// collaborator whose repo this is may not want flywheel-specific content in
+	// tracked history at all (fw-vbt). Two places have to know: doctor.go
+	// diagnoses the "agents" stage by file existence instead of git-tracking,
+	// and reads settings.local.json for the grants probe; run.go copies the
+	// same local paths into every new builder worktree, because `git worktree
+	// add` only populates tracked content — verified empirically, a worktree
+	// for such a repo otherwise has none of it and every builder regresses to
+	// "Unknown command: /flywheel-next".
+	AgentsUntracked bool `json:"agents_untracked,omitempty"`
 	// DefaultBranch is the branch a merge has to reach before a bead is done
 	// (fw-ojk). Resolved from gh by reconcile-board, deliberately NOT settable
 	// from the roster: a pin is a second source of truth that goes stale

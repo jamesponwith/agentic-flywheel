@@ -265,13 +265,30 @@ func TestPresentRequiresGitToTrackIt(t *testing.T) {
 		}
 	}
 
-	if !present(dir, "tracked.md") {
+	if !present(dir, "tracked.md", true) {
 		t.Error("a tracked file was reported missing")
 	}
-	if present(dir, "untracked.md") {
+	if present(dir, "untracked.md", true) {
 		t.Error("an untracked file was reported present — this is the bug that made three repos claim parity they did not have")
 	}
-	if present(dir, "absent.md") {
+	if present(dir, "absent.md", true) {
 		t.Error("a file that does not exist was reported present")
+	}
+}
+
+// fw-vbt: a Repo.AgentsUntracked repo keeps its agent scaffolding untracked on
+// purpose, so present() must fall back to file existence for those artifacts
+// when the caller says tracking is not required — but an absent file is still
+// absent either way.
+func TestPresentRequireTrackedFalse(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "untracked.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !present(dir, "untracked.md", false) {
+		t.Error("an untracked file was reported missing when tracking was not required")
+	}
+	if present(dir, "absent.md", false) {
+		t.Error("a file that does not exist was reported present even with tracking not required")
 	}
 }

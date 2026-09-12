@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -38,5 +40,49 @@ func TestCommitsSinceHandlesAMissingBase(t *testing.T) {
 	// If HEAD could not be read, claim no evidence rather than guessing.
 	if got := commitsSince(t.TempDir(), "", "any"); got != 0 {
 		t.Errorf("got %d, want 0", got)
+	}
+}
+
+// fw-vbt: `git worktree add` only populates tracked content — verified
+// empirically against a real repo. copyLocalAgentArtifacts is what makes a
+// Repo.AgentsUntracked repo's builder see its untracked scaffolding anyway;
+// without it every builder regresses to "Unknown command: /flywheel-next".
+func TestCopyLocalAgentArtifactsCarriesWhatExists(t *testing.T) {
+	repoPath := t.TempDir()
+	wt := t.TempDir()
+
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(repoPath, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".claude/skills/flywheel-next/SKILL.md", "next")
+	write("tools/flywheel/guard.sh", "#!/bin/sh\n")
+	write(".claude/settings.local.json", `{"permissions":{"allow":["Bash(cargo build:*)"]}}`)
+	// Deliberately do not write flywheel-review or flaky.sh, or .flywheel: not
+	// every repo carries every artifact, and that must not be an error.
+
+	repo := Repo{Path: repoPath, AgentsUntracked: true}
+	if err := copyLocalAgentArtifacts(repo, wt); err != nil {
+		t.Fatalf("copyLocalAgentArtifacts: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(wt, ".claude/skills/flywheel-next/SKILL.md"))
+	if err != nil || string(got) != "next" {
+		t.Errorf("flywheel-next skill was not carried into the worktree: %v %q", err, got)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "tools/flywheel/guard.sh")); err != nil {
+		t.Errorf("guard.sh was not carried into the worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, ".claude/settings.local.json")); err != nil {
+		t.Errorf("settings.local.json was not carried into the worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, ".claude/skills/flywheel-review")); err == nil {
+		t.Errorf("an artifact the repo never had appeared in the worktree anyway")
 	}
 }

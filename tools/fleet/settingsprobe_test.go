@@ -198,7 +198,7 @@ func TestProbeSettings(t *testing.T) {
 			default:
 				writeSettings(t, dir, tt.settings)
 			}
-			ok, why := probeSettings(dir, tt.lang)
+			ok, why := probeSettings(dir, tt.lang, false)
 			if ok != tt.want {
 				t.Errorf("probeSettings ok = %v, want %v (why: %s)", ok, tt.want, why)
 			}
@@ -209,6 +209,31 @@ func TestProbeSettings(t *testing.T) {
 				t.Errorf("why = %q names %q, which the file grants", why, tt.notWhy)
 			}
 		})
+	}
+}
+
+// fw-vbt: a Repo.AgentsUntracked repo keeps its grants in settings.local.json
+// instead of settings.json. probeSettings must merge the two when told to —
+// and must NOT when it isn't, so an ordinary repo's gitignored local file
+// still cannot paper over a powerless tracked one (fw-7al's second gap).
+func TestProbeSettingsMergesLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeSettings(t, dir, settingsWith(t, permissions{Allow: without("Bash(go test:*)", "Bash(gh pr create:*)")}))
+	localPath := filepath.Join(dir, settingsLocalPath)
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	local := settingsWith(t, permissions{Allow: []string{"Bash(go test:*)", "Bash(gh pr create:*)"}})
+	if err := os.WriteFile(localPath, []byte(local), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, why := probeSettings(dir, "go", false); ok {
+		t.Errorf("mergeLocal=false granted everything using the local-only file: %s", why)
+	}
+	ok, why := probeSettings(dir, "go", true)
+	if !ok {
+		t.Errorf("mergeLocal=true still reported missing capabilities: %s", why)
 	}
 }
 

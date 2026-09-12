@@ -86,8 +86,8 @@ func probes(repo Repo) []Probe {
 	// one cannot, and drift.yml is where a powerless file should surface.
 	// Gated on present(): a gitignored one is the manifest's gap, and reading
 	// it off disk anyway would call it working (the second of fw-7al's three).
-	if present(repo.Path, settingsPath) {
-		ok, why := probeSettings(repo.Path, repo.Lang)
+	if present(repo.Path, settingsPath, true) {
+		ok, why := probeSettings(repo.Path, repo.Lang, repo.AgentsUntracked)
 		out = append(out, Probe{Name: "settings grants", OK: ok, Why: why})
 	}
 	return out

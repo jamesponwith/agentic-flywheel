@@ -24,17 +24,21 @@
       "window_hours": 8
     }
   },
+  "_repo_order_note": "Allocate() walks repos in THIS array's order and spends the shared review-weight budget as it goes — a repo listed first gets first claim on tonight's budget, not just tiebreak priority within its own ready queue (fw-vbt). phux-mobile is listed first while the Android epic (phux-077) is the priority: with phux first, phux's own backlog was consuming the whole 10/10 budget most nights before phux-mobile was ever reached. Swap the order back once Android and iOS-side phux-mobile work are running in parallel and phux deserves an equal claim again.",
   "repos": [
-    {
-      "name": "phux",
-      "path": "phux",
-      "lang": "rust"
-    },
     {
       "name": "phux-mobile",
       "path": "phux-mobile",
       "lang": "swift",
-      "_note": "Tuist/Swift iOS app with a Rust FFI layer (rust/phux-mobile-ffi); no Android module yet. builder-swift's skills include kotlin ahead of that work (fw-6xf) — drop it if the Android build ends up needing its own agent instead."
+      "agents_untracked": true,
+      "_note": "Tuist/Swift iOS app with a Rust FFI layer (rust/phux-mobile-ffi), plus a new Android module (phux-077, fw-6xf). builder-swift's skills include kotlin and rust for that work. agents_untracked: phall1 wants the repo free of anything flywheel-specific in tracked history — skills, guard.sh, and builder permissions (in .claude/settings.local.json, not settings.json) are untracked/.git/info/excluded, and run.go carries them into every builder worktree (fw-vbt)."
+    },
+    {
+      "name": "phux",
+      "path": "phux",
+      "lang": "rust",
+      "agents_untracked": true,
+      "_note": "agents_untracked: same as phux-mobile, above — phall1's repos, same preference (fw-vbt)."
     }
   ],
   "agents": [

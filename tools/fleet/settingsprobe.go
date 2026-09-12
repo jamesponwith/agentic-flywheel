@@ -24,8 +24,15 @@ import (
 
 // settingsPath is the one file in the checkout the spawned runner reads for
 // permissions. settings.local.json is gitignored and a spawner's worktree
-// never has it, so a grant there helps a human at a terminal and nobody else.
+// never has it, so a grant there normally helps a human at a terminal and
+// nobody else — UNLESS the repo is Repo.AgentsUntracked (fw-vbt), in which
+// case run.go copies settingsLocalPath into every worktree it creates
+// specifically so a grant there reaches the builder too.
 const settingsPath = ".claude/settings.json"
+
+// settingsLocalPath is merged into settingsPath's permissions when probing an
+// AgentsUntracked repo — see settingsPath's comment.
+const settingsLocalPath = ".claude/settings.local.json"
 
 // capability is one thing flywheel-next invokes. Tool is the permission-rule
 // tool name; Cmd is the Bash command prefix, empty for tools that take none.
@@ -71,8 +78,10 @@ type permissions struct {
 
 // probeSettings reports whether repoPath's settings.json grants what a builder
 // needs, naming each capability it does not. lang picks the test runner; an
-// unknown language checks everything but the runner.
-func probeSettings(repoPath, lang string) (bool, string) {
+// unknown language checks everything but the runner. mergeLocal reads
+// settingsLocalPath too and folds its allow/deny into the same evaluation —
+// set for a Repo.AgentsUntracked repo, whose grants live there instead.
+func probeSettings(repoPath, lang string, mergeLocal bool) (bool, string) {
 	b, err := os.ReadFile(filepath.Join(repoPath, settingsPath))
 	if err != nil {
 		return false, "no " + settingsPath + " — the runner grants nothing without one"
@@ -82,6 +91,21 @@ func probeSettings(repoPath, lang string) (bool, string) {
 	}
 	if err := json.Unmarshal(b, &s); err != nil {
 		return false, settingsPath + " is not valid JSON: " + err.Error()
+	}
+	if mergeLocal {
+		if lb, err := os.ReadFile(filepath.Join(repoPath, settingsLocalPath)); err == nil {
+			var ls struct {
+				Permissions permissions `json:"permissions"`
+			}
+			if err := json.Unmarshal(lb, &ls); err != nil {
+				return false, settingsLocalPath + " is not valid JSON: " + err.Error()
+			}
+			s.Permissions.Allow = append(s.Permissions.Allow, ls.Permissions.Allow...)
+			s.Permissions.Deny = append(s.Permissions.Deny, ls.Permissions.Deny...)
+			if s.Permissions.DefaultMode == "" {
+				s.Permissions.DefaultMode = ls.Permissions.DefaultMode
+			}
+		}
 	}
 
 	var missing []string
@@ -103,7 +127,11 @@ func probeSettings(repoPath, lang string) (bool, string) {
 		}
 	}
 	if len(missing) > 0 {
-		return false, settingsPath + " does not grant: " + strings.Join(missing, "; ")
+		checked := settingsPath
+		if mergeLocal {
+			checked += " + " + settingsLocalPath
+		}
+		return false, checked + " does not grant: " + strings.Join(missing, "; ")
 	}
 	return true, "grants what a builder invokes"
 }

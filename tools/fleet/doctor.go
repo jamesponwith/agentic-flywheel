@@ -108,7 +108,8 @@ func Diagnose(repo Repo) Diagnosis {
 		if repo.skips(a.Stage) {
 			continue // this repo has declared it has no use for the stage
 		}
-		if present(repo.Path, a.Path) {
+		requireTracked := !(a.Stage == "agents" && repo.AgentsUntracked)
+		if present(repo.Path, a.Path, requireTracked) {
 			d.Present++
 			continue
 		}
@@ -191,16 +192,25 @@ func copyPath(src, dst string) error {
 // is a third state alongside present and missing: a training project with
 // nothing deployed is not BEHIND on Operate, it simply has no use for it, and a
 // checklist that reports a permanent false gap trains people to ignore it.
-// present reports whether an artifact exists AND is tracked by git.
+// present reports whether an artifact exists and, when requireTracked is set,
+// is tracked by git.
 //
 // os.Stat alone answered "a filename existed on this filesystem at this
 // instant", which is not the question. Three repos reported "complete" on
 // artifacts that were never committed — including drift.yml, the check meant
 // to catch exactly that, which 404s on GitHub in those repos. What a clone and
-// CI see is what matters, so an untracked file is a gap.
-func present(repoPath, rel string) bool {
+// CI see is what matters, so an untracked file is a gap — normally.
+//
+// requireTracked is false only for the agents-stage artifacts of a repo whose
+// owner keeps them untracked on purpose (Repo.AgentsUntracked, fw-vbt): run.go
+// copies those into every worktree it creates, so file existence in the main
+// checkout is the real question there, not git's index.
+func present(repoPath, rel string, requireTracked bool) bool {
 	if _, err := os.Stat(filepath.Join(repoPath, rel)); err != nil {
 		return false
+	}
+	if !requireTracked {
+		return true
 	}
 	// A directory counts as tracked if git tracks anything inside it.
 	out, err := inDir(repoPath, "git", "ls-files", "--error-unmatch", rel).Output()
