@@ -107,6 +107,33 @@ func TestInstallCapturesAWorkingPath(t *testing.T) {
 	}
 }
 
+// fw-vbt: PATH alone finds `adb` on this machine, but Gradle and cargo-ndk
+// still cannot find the SDK/NDK without JAVA_HOME/ANDROID_HOME/
+// ANDROID_SDK_ROOT/ANDROID_NDK_HOME — the exact "the timer was fixed and the
+// thing the timer schedules was not" shape as the PATH bug this same install
+// step already exists to prevent. Checked by reading the generated script
+// rather than by installing, matching TestInstallCapturesAWorkingPath.
+func TestInstallCapturesToolchainEnvVars(t *testing.T) {
+	b, err := os.ReadFile("nightly.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	for _, v := range []string{"JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_NDK_HOME"} {
+		if !strings.Contains(src, v) {
+			t.Errorf("install does not capture %s — a builder needing it would fail exactly like the PATH bug this step fixes", v)
+		}
+	}
+	// Captured conditionally, not hardcoded: a machine without Android tooling
+	// must not get an empty or bogus Environment= line.
+	if !strings.Contains(src, `if [ -n "${!v:-}" ]`) {
+		t.Error("toolchain env vars are not captured conditionally — a var this installer's shell lacks should be absent, not empty")
+	}
+	if !strings.Contains(src, "Environment=PATH=$PATH$extra_env") {
+		t.Error("the extra toolchain vars are not appended after PATH in the generated unit")
+	}
+}
+
 func TestOnlyOneTwoFourIsATimeout(t *testing.T) {
 	// The regression itself: `|| echo "(run exceeded ...)"` fired on every
 	// non-zero exit. Assert the script distinguishes 124 from the rest.

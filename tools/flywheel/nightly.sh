@@ -22,6 +22,20 @@ RUN_CEILING="${FLEET_RUN_CEILING:-90m}"
 case "${1:-help}" in
 install)
   mkdir -p "$HOME/.config/systemd/user"
+  # Toolchain env vars a builder's gate needs beyond PATH — Gradle and
+  # cargo-ndk resolve their SDK/NDK from these, not from a binary on PATH, so a
+  # PATH that finds `adb` fine still leaves a build unable to find the SDK
+  # (fw-vbt). Captured conditionally: a var this installer's shell does not
+  # have is a var no builder gets either — that is correct, not a gap;
+  # inventing one here would be a second source of truth for state the shell
+  # already owns.
+  extra_env=""
+  for v in JAVA_HOME ANDROID_HOME ANDROID_SDK_ROOT ANDROID_NDK_HOME; do
+    if [ -n "${!v:-}" ]; then
+      extra_env="$extra_env
+Environment=$v=${!v}"
+    fi
+  done
   cat > "$HOME/.config/systemd/user/flywheel-nightly.service" <<UNIT
 [Unit]
 Description=Flywheel nightly fleet run
@@ -31,7 +45,7 @@ WorkingDirectory=$PWD
 # The installer's PATH, captured. A systemd user service otherwise gets a
 # minimal one with no go, no bd and no gh, and the run dies before it starts —
 # which is exactly how the first unattended night was lost.
-Environment=PATH=$PATH
+Environment=PATH=$PATH$extra_env
 ExecStart=$PWD/tools/flywheel/nightly.sh run
 UNIT
   cat > "$HOME/.config/systemd/user/flywheel-nightly.timer" <<UNIT
