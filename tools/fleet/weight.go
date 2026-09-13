@@ -52,18 +52,44 @@ func weightOf(as []Assignment) int {
 // A PR whose bead cannot be resolved counts DefaultWeight rather than zero:
 // the safe error is to over-estimate pressure and start less work, never to
 // under-estimate it and pile onto a queue nobody can clear.
+//
+// A draft PR is excluded entirely, not counted at DefaultWeight: GitHub's own
+// draft state means "not ready for review", so it is not review pressure yet
+// by definition, any more than an open issue with no PR is. Counting it
+// anyway inflated InReview to 18 against a budget of 10 on a real roster —
+// five of phux's seven open PRs were drafts — and blocked every repo's
+// allocation, including a bead with nothing actually wrong with it (fw-w0u).
 func ghReviewLoad(repo Repo) int {
-	var prs []struct {
-		HeadRefName string `json:"headRefName"`
-	}
+	var prs []openPR
 	// Cannot tell: assume the queue is clear rather than blocking the fleet on
 	// a flaky network. The kill switch is the tool for stopping.
-	if ghJSON(repo, []string{"pr", "list", "--state", "open"}, "headRefName", &prs) != nil {
+	if ghJSON(repo, []string{"pr", "list", "--state", "open"}, "headRefName,isDraft", &prs) != nil {
 		return 0
 	}
+	return reviewLoadOf(prs, bdClient{dir: repo.Path, run: execBD})
+}
+
+// openPR is the slice of `gh pr list --json` this package reads.
+type openPR struct {
+	HeadRefName string `json:"headRefName"`
+	IsDraft     bool   `json:"isDraft"`
+}
+
+// beadShower is the one bdClient method reviewLoadOf needs — narrowed so a
+// test can fake it without a real repo.
+type beadShower interface {
+	show(id string) (Bead, error)
+}
+
+// reviewLoadOf sums review weight across prs. Split from ghReviewLoad so the
+// counting logic — the part that matters — is testable without shelling out
+// to gh (fw-w0u).
+func reviewLoadOf(prs []openPR, bd beadShower) int {
 	total := 0
-	bd := bdClient{dir: repo.Path, run: execBD}
 	for _, pr := range prs {
+		if pr.IsDraft {
+			continue
+		}
 		id, ok := strings.CutPrefix(pr.HeadRefName, "bead/")
 		if !ok {
 			total += DefaultWeight
