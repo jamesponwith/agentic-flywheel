@@ -1,29 +1,29 @@
 {
   "agent": {
     "autonomous_prs": {
-      "clean_rate": 0.5,
+      "clean_rate": 0.3333333333333333,
       "measurable": true,
-      "merged_without_further_commits": 20,
+      "merged_without_further_commits": 13,
       "note": "counts bead/* PRs with no commits after opening, by any author — not a measure of human intervention",
-      "opened": 40
+      "opened": 39
     },
     "final_gate_pass": {
-      "green": 44,
+      "green": 43,
       "measurable": true,
       "note": "state of checks at merge, not the first attempt: /check-runs returns filter=latest, so a failed-then-rerun PR counts as green. Structurally near 1.0 — do not read it as first-pass.",
-      "rate": 0.9777777777777777,
-      "total": 45
+      "rate": 0.9772727272727273,
+      "total": 44
     },
     "review_round_trips": {
       "measurable": false,
       "median": 0,
-      "samples": 45,
+      "samples": 44,
       "why": "review happens locally (ADR 0002/0013); GitHub review events do not exist in this workflow"
     },
     "rework_commits_after_open": {
       "measurable": false,
-      "median": 0,
-      "samples": 45,
+      "median": 1,
+      "samples": 44,
       "why": "squash-merge workflow: commit dates precede PR creation, so this is structurally 0"
     }
   },
@@ -37,7 +37,7 @@
     "releases_last_30d": 0,
     "releases_total": 0
   },
-  "generated_at": "2026-09-07T10:47:02Z",
+  "generated_at": "2026-09-14T11:00:36Z",
   "lead_time_hours": {
     "median": 0,
     "samples": 0
