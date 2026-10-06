@@ -56,9 +56,18 @@ entries() {
 # .claude/ after symlinks resolve. The mapping makes any other target
 # inexpressible; a symlinked directory under .claude/ is the one way out, and
 # it is refused here.
+# canon <path> — resolve symlinks without requiring the path to exist (GNU
+# `realpath -m`). macOS ships BSD realpath, which has no -m.
+canon() {
+  if realpath -m / >/dev/null 2>&1; then realpath -m "$1"
+  elif command -v grealpath >/dev/null; then grealpath -m "$1"
+  else python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"
+  fi
+}
+
 check_target() {
   local rel="$1" resolved
-  resolved="$(realpath -m "$REPO_DIR/.claude/$rel")"
+  resolved="$(canon "$REPO_DIR/.claude/$rel")"
   case "$resolved" in
     "$REPO_DIR/.claude/"*) ;;
     *)
