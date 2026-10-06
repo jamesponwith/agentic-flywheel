@@ -82,3 +82,7 @@ bd.db
 # because two branches touching the board always both rewrite them.
 issues.jsonl
 interactions.jsonl
+
+# Added by bd (missing required patterns)
+*.gate.lock*
+dolt-server-config.yaml
