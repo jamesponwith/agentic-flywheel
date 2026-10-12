@@ -1,11 +1,11 @@
 {
   "agent": {
     "autonomous_prs": {
-      "clean_rate": 0.3333333333333333,
+      "clean_rate": 0.3157894736842105,
       "measurable": true,
-      "merged_without_further_commits": 13,
+      "merged_without_further_commits": 12,
       "note": "counts bead/* PRs with no commits after opening, by any author — not a measure of human intervention",
-      "opened": 39
+      "opened": 38
     },
     "final_gate_pass": {
       "green": 43,
@@ -37,7 +37,7 @@
     "releases_last_30d": 0,
     "releases_total": 0
   },
-  "generated_at": "2026-10-05T12:44:41Z",
+  "generated_at": "2026-10-12T13:35:52Z",
   "lead_time_hours": {
     "median": 0,
     "samples": 0
