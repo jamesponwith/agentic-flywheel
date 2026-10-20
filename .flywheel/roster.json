@@ -68,6 +68,26 @@
       "lang": "python",
       "paused": true,
       "role": "template"
+    },
+    {
+      "name": "all-about-tennis",
+      "path": "all-about-tennis",
+      "lang": "ts"
+    },
+    {
+      "name": "aat-mobile",
+      "path": "aat-mobile",
+      "lang": "ts"
+    },
+    {
+      "name": "all-about-tennis-expo",
+      "path": "all-about-tennis-expo",
+      "lang": "ts"
+    },
+    {
+      "name": "allatennis-instagram",
+      "path": "allatennis-instagram",
+      "lang": "python"
     }
   ],
   "agents": [
@@ -98,5 +118,6 @@
       ]
     }
   ],
-  "_agents_note": "Cut from 8 agents across 5 roles to 2 builders (retro 2026-08). Roster.Match had exactly one call site and only ever matched role=builder; coordinator, reviewer, operator and retro were declared and never dispatched. ADR 0001: a mechanism with zero call sites cannot improve by next month."
+  "_agents_note": "Cut from 8 agents across 5 roles to 2 builders (retro 2026-08). Roster.Match had exactly one call site and only ever matched role=builder; coordinator, reviewer, operator and retro were declared and never dispatched. ADR 0001: a mechanism with zero call sites cannot improve by next month.",
+  "_aat_note": "All About Tennis repos, cloned and set up by the AllAboutTennis scaffold (make onboard; manifest repos.tsv). No builder covers them yet, so allocate declines their beads with a reason until one is added."
 }
