@@ -36,6 +36,14 @@ func TestExpandPathUsesEnvWorkspace(t *testing.T) {
 	}
 }
 
+func TestExpandPathEnvBeatsRosterRoot(t *testing.T) {
+	// A committed workspace_root must not pin every machine to one layout.
+	t.Setenv("FLYWHEEL_WORKSPACE", "/env/ws")
+	if got := expandPath("router", "~/Workspace"); got != "/env/ws/router" {
+		t.Errorf("got %q, want /env/ws/router", got)
+	}
+}
+
 func TestLoadRosterExpandsPaths(t *testing.T) {
 	// The committed roster must not need editing on a different machine.
 	dir := t.TempDir()
