@@ -16,8 +16,8 @@ import (
 )
 
 type Roster struct {
-	// WorkspaceRoot is prepended to any relative repo path. Defaults to
-	// $FLYWHEEL_WORKSPACE, then ~/Workspace. Keeping it out of the committed
+	// WorkspaceRoot is prepended to any relative repo path. $FLYWHEEL_WORKSPACE
+	// overrides it; with neither set, ~/Workspace. Keeping it out of the committed
 	// paths is what makes the roster portable — and stops a public repo
 	// publishing the maintainer's home directory layout.
 	WorkspaceRoot string `json:"workspace_root,omitempty"`
@@ -55,8 +55,10 @@ func expandPath(p, root string) string {
 	if filepath.IsAbs(p) {
 		return p
 	}
-	if root == "" {
-		root = os.Getenv("FLYWHEEL_WORKSPACE")
+	// The env var beats the roster: the roster is committed and shared, the
+	// env var is this machine's answer to where its clones live (fw-0r8).
+	if env := os.Getenv("FLYWHEEL_WORKSPACE"); env != "" {
+		root = env
 	}
 	if root == "" {
 		if home, err := os.UserHomeDir(); err == nil {
