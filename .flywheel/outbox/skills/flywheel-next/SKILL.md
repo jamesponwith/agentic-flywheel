@@ -49,7 +49,7 @@ still means no edit**.
 
 Register with blackbird before acting (ADR 0004):
 
-- `blackbird_agent_register` with `agent_name` = `<repo>/builder` and
+- `blackbird_join` with `agent_name` = `<repo>/builder` and
   `project_key` = **`$FLYWHEEL_PROJECT_KEY`** when the spawner set it. Do not
   derive the path yourself: blackbird keys reservations by `project_key`, and
   two agents that resolve the same repo differently — one through a symlink,
@@ -57,7 +57,9 @@ Register with blackbird before acting (ADR 0004):
   failure reservations exist to prevent, silently (fw-wb2.9). Fall back to the
   repo's absolute path only if the variable is unset.
 - **Your identity is already in your environment.** `$FLYWHEEL_BLACKBIRD_AGENT`
-  and `$FLYWHEEL_BLACKBIRD_TOKEN` are set by the spawner. Use them and do not
+  and `$FLYWHEEL_BLACKBIRD_TOKEN` are set by the spawner. Pass them to
+  `blackbird_join` as `agent_name` and `registration_token`; every later call
+  takes the same token as `agent_token`. Use them and do not
   go looking for a token file: the sandbox scopes your reads to the worktree,
   ADR 0003 forbids you reading secrets, and the file is the coordinator's
   business. A builder that went looking anyway got `UNAUTHENTICATED`, could
@@ -105,12 +107,15 @@ implementations differ materially, **escalate rather than guess** (step 8).
 Decide which files you will touch, then reserve the *narrowest* selectors that
 cover them, before the first edit:
 
-- `blackbird_reservation_acquire`, `mode: exclusive`, `kind: exact` for single
-  files and `subtree` for directories, with a TTL matching your expected run.
-- `LEASE_CONFLICT` means another agent owns that ground. Do **not** wait, retry
+- `blackbird_claim`, `mode: exclusive`, one selector per path with `kind: exact`
+  for single files and `subtree` for directories, and `ttl_seconds` matching
+  your expected run. Every selector is taken or none is.
+- A result with `ok: false` means another agent owns that ground; it names the
+  holder. Do **not** wait, retry
   in a loop, or edit anyway: release what you hold, comment on the bead naming
   the conflict, unclaim it, and pick a different bead.
-- Renew before expiry if the work runs long. An expired lease means you no
+- Renew before expiry if the work runs long: call `blackbird_claim` again with
+  the same selector set. An expired lease means you no
   longer hold the ground — stop editing and re-acquire.
 
 No reservation, no edit. If blackbird is unreachable, that is a hard stop, not a
@@ -212,7 +217,8 @@ bd note <id> "PR #<n> opened: <one line>"
 tools/flywheel/guard.sh log bead.pr_opened bead=<id> pr=<n>
 ```
 
-Release every reservation and remove the worktree. **Do not merge the PR** — the
+Release every reservation (`blackbird_release` with the exact selector set
+you claimed; a partial set is rejected) and remove the worktree. **Do not merge the PR** — the
 human is the merge authority. Leave the bead open until the PR merges; a PR is
 not a closed bead.
 
@@ -226,7 +232,8 @@ green:
    what you tried.
 2. Release every reservation and remove the worktree.
 3. `tools/flywheel/guard.sh log bead.abandoned bead=<id> reason=<short>`
-4. Escalate to the human via a blackbird message (`escalate`, ack required).
+4. Escalate to the human via `blackbird_say` (`escalate`,
+   `acknowledgement_required: true`).
 
 Closing nothing is a correct outcome. Deleting a failing test to make the gate
 green, or opening a PR you know is wrong, is not.
