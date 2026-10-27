@@ -56,7 +56,7 @@ jobs:
         # the conformance suite asserts bd's behaviour, so an unannounced bd
         # release should fail loudly here, not silently change what we test.
         run: |
-          ver=1.2.2
+          ver=1.3.1
           curl -fsSL "https://github.com/steveyegge/beads/releases/download/v${ver}/beads_${ver}_linux_amd64.tar.gz" \
             | tar -xz -C /usr/local/bin bd
           bd version
