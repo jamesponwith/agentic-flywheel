@@ -105,6 +105,10 @@ func TestInstallCapturesAWorkingPath(t *testing.T) {
 		t.Error("the generated unit does not carry a PATH; a systemd user service " +
 			"gets a minimal one and the run dies before it starts")
 	}
+	// launchd gives a LaunchAgent the same minimal PATH (fw-1ok).
+	if !strings.Contains(src, "<key>PATH</key><string>$PATH</string>") {
+		t.Error("the generated LaunchAgent does not carry a PATH")
+	}
 }
 
 func TestOnlyOneTwoFourIsATimeout(t *testing.T) {
