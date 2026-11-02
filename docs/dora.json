@@ -29,6 +29,7 @@
   },
   "change_failure_rate": {
     "attempts": 0,
+    "failed_changes": 0,
     "failed_deploys": 0,
     "incidents": 0,
     "rate": 0,
@@ -42,7 +43,7 @@
     "source": "releases",
     "total": 0
   },
-  "generated_at": "2026-10-26T11:35:34Z",
+  "generated_at": "2026-11-02T13:54:25Z",
   "lead_time_hours": {
     "median": 0,
     "samples": 0
