@@ -141,6 +141,24 @@ both. Work under the repo's standing conventions — ponytail discipline, stdlib
 first, test-first, no new dependency without an ADR, `// ponytail:` comments on
 deliberate shortcuts.
 
+## 5a. Deliverables under `.claude/` go through the outbox (ADR 0015)
+
+You cannot write under `.claude/`: the harness refuses the path in unattended
+sessions — any path *containing* `.claude/`, a mirror of it included — and no
+grant is reachable. Two runs were lost rediscovering that (fw-bu2, fw-ajl). Do
+not retry, and do not look for another way in: the block is deliberate; those
+files are your own leash.
+
+Instead, write the **full intended file** to `.flywheel/outbox/<path>`, which
+maps to `.claude/<path>` (e.g. `.flywheel/outbox/skills/flywheel-review/SKILL.md`
+for the review skill), and commit it like any other change.
+`tools/flywheel/outbox.sh status` lists what is pending and `outbox.sh diff`
+shows the real diff against the live files — quote that diff in the PR body,
+and say there that the human must run `tools/flywheel/outbox.sh apply` on the
+PR branch before merging, so the PR shows the applied change before it lands.
+Never run `apply` yourself: it refuses builder identities on purpose, and
+working around that refusal is a step-8 escalation, not an obstacle.
+
 ## 6. Run the gate
 
 The full local gate, exactly as a human would: pre-commit hooks (fmt, vet, short
