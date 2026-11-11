@@ -3,8 +3,8 @@
 #
 # This is NOT a GitHub Action. Builders are local agent sessions with local
 # credentials and a local blackbird daemon; a hosted runner has none of those.
-# So the schedule lives where the agents do — a systemd user timer on this
-# machine, installed by `nightly.sh install`.
+# So the schedule lives where the agents do — a systemd user timer on Linux, a
+# LaunchAgent on macOS — installed by `nightly.sh install`.
 #
 # Every bound is here rather than in the agent: the kill switch is checked
 # first, the whole run has a wall-clock ceiling, and the digest is written
@@ -15,12 +15,49 @@ cd "$(git -C "$(dirname "$0")/../.." rev-parse --show-toplevel 2>/dev/null || ec
 ROSTER="${FLEET_ROSTER:-.flywheel/roster.json}"
 DIGEST_DIR="${FLEET_DIGEST_DIR:-.flywheel/digests}"
 RUN_CEILING="${FLEET_RUN_CEILING:-90m}"
+LAUNCHD_LABEL="dev.flywheel.nightly"
+LAUNCHD_PLIST="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
+
+# RFC 3339 UTC to epoch seconds, GNU date or BSD date. 0 when neither parses.
+epoch() { date -u -d "$1" +%s 2>/dev/null || date -u -j -f %Y-%m-%dT%H:%M:%SZ "$1" +%s 2>/dev/null || echo 0; }
 
 # No default action. A bare invocation of a scheduler must not start one — the
 # first test of this script launched a real fleet run because the default was
 # "run", which is the same mistake as a dry-run flag defaulting to off.
 case "${1:-help}" in
 install)
+  if [ "$(uname)" = Darwin ]; then
+    # The fleet host moved from a Linux box to a Mac mini, where there is no
+    # systemd: the old install failed and no night was scheduled at all.
+    # Same contract as the unit below — 02:30, the installer's PATH, run.
+    # AbandonProcessGroup keeps a quota-resume sleeper alive after the run
+    # exits; launchd otherwise kills the job's whole process group.
+    mkdir -p "$(dirname "$LAUNCHD_PLIST")" .flywheel
+    cat > "$LAUNCHD_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LAUNCHD_LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>$PWD/tools/flywheel/nightly.sh</string><string>run</string></array>
+  <key>WorkingDirectory</key><string>$PWD</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>$PATH</string></dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>30</integer></dict>
+  <key>AbandonProcessGroup</key><true/>
+  <key>StandardOutPath</key><string>$PWD/.flywheel/nightly.log</string>
+  <key>StandardErrorPath</key><string>$PWD/.flywheel/nightly.log</string>
+</dict>
+</plist>
+PLIST
+    launchctl bootout "gui/$(id -u)/$LAUNCHD_LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$LAUNCHD_PLIST"
+    echo "installed $LAUNCHD_PLIST; runs daily at 02:30"
+    echo "stop it with: launchctl bootout gui/$(id -u)/$LAUNCHD_LABEL && rm $LAUNCHD_PLIST"
+    exit 0
+  fi
   mkdir -p "$HOME/.config/systemd/user"
   cat > "$HOME/.config/systemd/user/flywheel-nightly.service" <<UNIT
 [Unit]
@@ -66,7 +103,8 @@ run)
   esac
   # A timer's PATH is not a login shell's. Fail here, by name, rather than
   # inside a subprocess whose error the digest will paraphrase.
-  for need in go git; do
+  # timeout too: macOS has none unless coreutils is installed.
+  for need in go git timeout; do
     command -v "$need" >/dev/null 2>&1 || {
       echo "nightly: '$need' is not on PATH ($PATH)" >&2
       echo "nightly: reinstall with 'nightly.sh install' to capture the current PATH" >&2
@@ -114,7 +152,8 @@ run)
   # That is the intended behaviour and it is bounded three ways — each link
   # waits hours for a real reset, the review-weight budget refuses to dispatch
   # while PRs sit unreviewed (ADR 0009), and guard.sh stops everything.
-  # To break it by hand: systemctl --user stop 'flywheel-resume-*'.
+  # To break it by hand: systemctl --user stop 'flywheel-resume-*', or on
+  # macOS: pkill -f 'flywheel-resume'.
   # Every repo in the roster, not just this one. noteRateLimit writes the hold
   # into the repo whose builder hit the wall, so a Spotify builder's 429 lands
   # in Spotify's .flywheel/quota-hold — and reading only our own found a
@@ -125,29 +164,40 @@ run)
   # Earliest FUTURE hold wins: the account is one pool, so the first reset is
   # when work can start again wherever it was blocked.
   until_ts=$(go run ./tools/fleet holds -roster "$ROSTER" 2>/dev/null | head -1)
-  if [ -n "$until_ts" ] && command -v systemd-run >/dev/null 2>&1; then
-    if secs=$(( $(date -u -d "$until_ts" +%s 2>/dev/null || echo 0) - $(date -u +%s) )) \
-       && [ "$secs" -gt 0 ]; then
-      # +60s: waking exactly on the boundary races the reset and buys another
-      # 429, which would schedule another wakeup for the same instant.
-      # --setenv=PATH is the whole point of this line. systemd-run builds a
-      # TRANSIENT unit, which inherits nothing from the installed
-      # flywheel-nightly.service — so the PATH captured at install time does
-      # not reach the resume, and the first one ever scheduled died with
-      # "'go' is not on PATH" at exit 127. The timer was fixed and the thing
-      # the timer schedules was not.
-      systemd-run --user --on-active="$((secs + 60))s" \
-        --setenv="PATH=$PATH" \
-        --working-directory="$PWD" \
-        --unit="flywheel-resume-$(date -u +%Y%m%dT%H%M%SZ)" \
-        "$PWD/tools/flywheel/nightly.sh" run >/dev/null 2>&1 &&
-        echo "quota hold until $until_ts — resuming automatically in $(( (secs + 60) / 60 ))m"
-    fi
+  secs=0
+  [ -n "$until_ts" ] && secs=$(( $(epoch "$until_ts") - $(date -u +%s) ))
+  if [ "$secs" -gt 0 ] && [ "$(uname)" = Darwin ]; then
+    # No transient units on macOS. A detached sleeper is the same bound as
+    # systemd-run --on-active: it does not survive a reboot either.
+    # ponytail: lost on reboot; a dated one-shot LaunchAgent if that bites.
+    nohup bash -c 'sleep "$1" && exec "$2" run' flywheel-resume "$((secs + 60))" \
+      "$PWD/tools/flywheel/nightly.sh" >>.flywheel/nightly.log 2>&1 &
+    echo "quota hold until $until_ts — resuming automatically in $(( (secs + 60) / 60 ))m"
+  elif [ "$secs" -gt 0 ] && command -v systemd-run >/dev/null 2>&1; then
+    # +60s: waking exactly on the boundary races the reset and buys another
+    # 429, which would schedule another wakeup for the same instant.
+    # --setenv=PATH is the whole point of this line. systemd-run builds a
+    # TRANSIENT unit, which inherits nothing from the installed
+    # flywheel-nightly.service — so the PATH captured at install time does
+    # not reach the resume, and the first one ever scheduled died with
+    # "'go' is not on PATH" at exit 127. The timer was fixed and the thing
+    # the timer schedules was not.
+    systemd-run --user --on-active="$((secs + 60))s" \
+      --setenv="PATH=$PATH" \
+      --working-directory="$PWD" \
+      --unit="flywheel-resume-$(date -u +%Y%m%dT%H%M%SZ)" \
+      "$PWD/tools/flywheel/nightly.sh" run >/dev/null 2>&1 &&
+      echo "quota hold until $until_ts — resuming automatically in $(( (secs + 60) / 60 ))m"
   fi
   ;;
 
 status)
-  systemctl --user list-timers flywheel-nightly.timer --no-pager 2>/dev/null | sed -n 1,2p || echo "timer not installed"
+  if [ "$(uname)" = Darwin ]; then
+    launchctl print "gui/$(id -u)/$LAUNCHD_LABEL" >/dev/null 2>&1 \
+      && echo "launchd: $LAUNCHD_LABEL loaded, daily at 02:30" || echo "launchd job not installed"
+  else
+    systemctl --user list-timers flywheel-nightly.timer --no-pager 2>/dev/null | sed -n 1,2p || echo "timer not installed"
+  fi
   if [ -f .flywheel/quota-hold ]; then
     echo; echo "QUOTA HOLD until $(head -1 .flywheel/quota-hold) — $(tail -1 .flywheel/quota-hold)"
     systemctl --user list-timers 'flywheel-resume-*' --no-pager 2>/dev/null | sed -n 2p
@@ -160,7 +210,7 @@ help)
   cat <<'USAGE'
 nightly.sh — the nightly fleet run
 
-  install   enable the systemd user timer (02:30 daily)
+  install   schedule it at 02:30 daily (systemd user timer, or launchd on macOS)
   run       run the fleet once, now (this SPAWNS AGENTS)
   status    show the timer and the most recent digest
 
