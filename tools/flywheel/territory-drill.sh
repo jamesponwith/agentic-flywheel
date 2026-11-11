@@ -19,15 +19,16 @@ read -r -d '' PROMPT <<'PROMPT_END' || true
 Run a territory conformance drill against the local blackbird daemon. Report
 PASS or FAIL for each step and nothing else — no code, no fixes, no edits.
 
-1. Register two agents via blackbird_agent_register with project_key set to
-   this repository's absolute path: names drill/alpha and drill/beta.
-2. As alpha, blackbird_reservation_acquire an EXCLUSIVE subtree reservation on
-   "docs" with a 120s TTL. Expect success; note the lease_id and fences.
+1. Join as two agents via blackbird_join with project_key set to this
+   repository's absolute path: names drill/alpha and drill/beta. Keep each
+   returned registration_token; it is the agent_token for every later call.
+2. As alpha, blackbird_claim an EXCLUSIVE subtree selector on "docs" with
+   ttl_seconds 120. Expect ok: true; note the selector set returned.
 3. As beta, attempt an EXCLUSIVE exact reservation on "docs/adr/template.md" —
-   a path INSIDE alpha's subtree. Expect LEASE_CONFLICT. If beta succeeds,
+   a path INSIDE alpha's subtree. Expect ok: false naming alpha as holder. If beta succeeds,
    that is a FAIL and the most serious possible result: it means two builders
    can edit the same ground.
-4. As alpha, blackbird_reservation_release using the lease_id and fences.
+4. As alpha, blackbird_release with the exact selector set from step 2.
 5. As beta, retry the same exact reservation. Expect success now.
 6. Release beta's reservation.
 

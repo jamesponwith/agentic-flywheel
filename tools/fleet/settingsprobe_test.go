@@ -281,7 +281,7 @@ func TestCovers(t *testing.T) {
 		{"Write(src/**)", "Write", "", false}, // scoped: neither a full grant nor a revocation
 		{"Edit", "Write", "", false},
 		{"Bash(git commit:*", "Bash", "git commit", false}, // unbalanced: not a rule
-		{"mcp__blackbird__blackbird_agent_register", "Bash", "bd", false},
+		{"mcp__blackbird__blackbird_join", "Bash", "bd", false},
 	}
 	for _, tt := range tests {
 		if got := covers(tt.rule, tt.tool, tt.cmd); got != tt.want {
